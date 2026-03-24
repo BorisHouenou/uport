@@ -1,0 +1,4 @@
+# Root-level convenience symlink to the actual compose file
+# Usage from repo root: docker compose up
+include:
+  - path: infra/docker/docker-compose.yml

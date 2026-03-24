@@ -1,0 +1,118 @@
+version: "3.9"
+
+services:
+  # ─── PostgreSQL 16 + pgvector ──────────────────────────────
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: uportai_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: uportai
+      POSTGRES_PASSWORD: uportai
+      POSTGRES_DB: uportai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uportai -d uportai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis 7 ──────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: uportai_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── FastAPI API ───────────────────────────────────────────
+  api:
+    build:
+      context: ../../apps/api
+      dockerfile: Dockerfile
+    container_name: uportai_api
+    restart: unless-stopped
+    env_file: ../../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://uportai:uportai@db:5432/uportai
+      DATABASE_URL_SYNC: postgresql://uportai:uportai@db:5432/uportai
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../apps/api:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─── Celery Worker ────────────────────────────────────────
+  celery_worker:
+    build:
+      context: ../../apps/api
+      dockerfile: Dockerfile
+    container_name: uportai_celery
+    restart: unless-stopped
+    env_file: ../../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://uportai:uportai@db:5432/uportai
+      DATABASE_URL_SYNC: postgresql://uportai:uportai@db:5432/uportai
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    command: celery -A core.celery_app worker --loglevel=info --concurrency=4
+    volumes:
+      - ../../apps/api:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ─── Next.js Web ──────────────────────────────────────────
+  web:
+    build:
+      context: ../../apps/web
+      dockerfile: Dockerfile
+    container_name: uportai_web
+    restart: unless-stopped
+    env_file: ../../.env
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../../apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
