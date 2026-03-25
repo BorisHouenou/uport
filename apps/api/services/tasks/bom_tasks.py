@@ -1,8 +1,53 @@
-"""BOM processing task stubs — implemented in Sprint 3–4."""
+"""BOM processing Celery task — Sprint 3-4 implementation."""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'packages', 'ai-agents'))
+
 from core.celery_app import celery_app
 
 
 @celery_app.task(name="bom.process_upload", bind=True, max_retries=3)
 def process_bom_upload(self, org_id: str, product_id: str, file_content: str, file_ext: str):
-    """Parse a BOM file and classify each line item via HS classifier agent."""
-    raise NotImplementedError("Implemented in Sprint 3–4")
+    """
+    Parse a BOM file, classify each line item's HS code, and persist to DB.
+    file_content is hex-encoded bytes.
+    """
+    try:
+        from bom_parser import parse_bom
+        from hs_classifier import classify
+        from services.bom_service import save_bom_items_sync
+
+        content = bytes.fromhex(file_content)
+        rows = parse_bom(content, file_ext)
+
+        bom_items = []
+        for row in rows:
+            hs_code = row.hs_code
+            hs_confidence = None
+
+            # Classify if no HS code provided
+            if not hs_code and row.description:
+                result = classify(row.description)
+                if result.confidence >= 0.5:
+                    hs_code = result.hs_code
+                    hs_confidence = result.confidence
+
+            bom_items.append({
+                "product_id": product_id,
+                "description": row.description,
+                "quantity": row.quantity,
+                "unit_cost": row.unit_cost,
+                "currency": row.currency,
+                "origin_country": row.origin_country,
+                "hs_code": hs_code,
+                "hs_confidence": hs_confidence,
+                "is_originating": row.is_originating,
+                "classified_by": "ai" if hs_confidence else ("imported" if row.hs_code else "manual"),
+            })
+
+        save_bom_items_sync(product_id, org_id, bom_items)
+        return {"status": "completed", "items_processed": len(bom_items)}
+
+    except Exception as exc:
+        raise self.retry(exc=exc, countdown=30)
