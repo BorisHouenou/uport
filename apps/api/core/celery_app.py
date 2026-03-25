@@ -13,6 +13,9 @@ celery_app = Celery(
         "services.tasks.certificate_tasks",
         "services.tasks.ai_tasks",
         "services.tasks.webhook_tasks",
+        "services.tasks.retention_tasks",
+        "services.tasks.reminder_tasks",
+        "services.tasks.finetuning_tasks",
     ],
 )
 
@@ -30,6 +33,18 @@ celery_app.conf.update(
         "check-expired-declarations-daily": {
             "task": "webhook_tasks.fire_expired_declarations",
             "schedule": 86400,  # every 24 hours
+        },
+        "enforce-data-retention-weekly": {
+            "task": "retention_tasks.enforce_retention",
+            "schedule": 7 * 86400,  # every 7 days
+        },
+        "send-expiry-reminders-daily": {
+            "task": "reminder_tasks.send_expiry_reminders",
+            "schedule": 86400,  # every 24 hours
+        },
+        "export-finetuning-corrections-weekly": {
+            "task": "finetuning_tasks.export_corrections",
+            "schedule": 7 * 86400,  # every 7 days
         },
     },
 )

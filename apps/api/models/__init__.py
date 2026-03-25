@@ -10,6 +10,7 @@ from models.supplier import SupplierDeclaration
 from models.audit import AuditEvent
 from models.agreement import TradeAgreement, RooRule
 from models.webhook import WebhookEndpoint
+from models.correction import HumanCorrection
 
 __all__ = [
     "TimestampMixin",
@@ -25,4 +26,5 @@ __all__ = [
     "TradeAgreement",
     "RooRule",
     "WebhookEndpoint",
+    "HumanCorrection",
 ]

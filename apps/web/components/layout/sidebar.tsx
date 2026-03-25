@@ -13,6 +13,7 @@ import {
   Settings,
   ShieldCheck,
   CreditCard,
+  ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +24,7 @@ const navigation = [
   { name: "Bill of Materials", href: "/bom", icon: PackageSearch },
   { name: "Suppliers", href: "/supplier", icon: Users },
   { name: "Savings", href: "/savings", icon: TrendingUp },
+  { name: "Review Queue", href: "/review", icon: ClipboardCheck },
   { name: "Assistant", href: "/assistant", icon: MessageSquare },
 ];
 

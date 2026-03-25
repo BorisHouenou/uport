@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     aws_region: str = "ca-central-1"
     s3_bucket_documents: str = "uportai-documents"
 
+    # ─── Email (AWS SES) ──────────────────────────────────────
+    ses_from_email: str = ""           # e.g. "noreply@uportai.com"
+    app_base_url: str = "https://app.uportai.com"
+
     # ─── Observability ────────────────────────────────────────
     sentry_dsn: str = ""
     log_level: str = "INFO"

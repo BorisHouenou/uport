@@ -13,7 +13,7 @@ from middleware.audit import AuditMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
 from routers import (
     agreements, assistant, audit, billing, bom, certificates,
-    health, integrations, origin, outbound_webhooks, savings, suppliers, webhooks,
+    health, integrations, origin, outbound_webhooks, privacy, savings, suppliers, webhooks,
 )
 
 settings = get_settings()
@@ -82,4 +82,5 @@ app.include_router(integrations.router, prefix=API_PREFIX)
 app.include_router(savings.router, prefix=API_PREFIX)
 app.include_router(audit.router, prefix=API_PREFIX)
 app.include_router(outbound_webhooks.router, prefix=API_PREFIX)
+app.include_router(privacy.router, prefix=API_PREFIX)
 app.include_router(webhooks.router, prefix=API_PREFIX)

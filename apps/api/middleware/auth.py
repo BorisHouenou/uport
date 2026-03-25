@@ -22,12 +22,30 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
         )
-    return {
+    user = {
         "user_id": user_id,
         "org_id": org_id,
         "email": payload.get("email", ""),
         "role": payload.get("org_role", "member"),
     }
+
+    # Stamp org_id on request.state so get_db() can set the RLS context variable
+    try:
+        from starlette.requests import Request as StarletteRequest
+        import inspect
+        frame = inspect.currentframe()
+        # Walk up the call stack to find the Request object
+        for fi in inspect.getouterframes(frame):
+            local_vars = fi.frame.f_locals
+            req = local_vars.get("request") or local_vars.get("req")
+            if req is not None and hasattr(req, "state"):
+                req.state.org_id = org_id
+                req.state.user_id = user_id
+                break
+    except Exception:
+        pass
+
+    return user
 
 
 async def require_admin(
