@@ -81,6 +81,44 @@ export function useClassifyHS() {
   });
 }
 
+// ─── Suppliers ────────────────────────────────────────────────────────────────
+export function useSupplierDeclarations(expiringWithinDays?: number) {
+  return useQuery({
+    queryKey: ["declarations", expiringWithinDays],
+    queryFn: () => {
+      const url = expiringWithinDays != null
+        ? `/suppliers/declarations?expiring_within_days=${expiringWithinDays}`
+        : "/suppliers/declarations";
+      return apiClient.get(url).then(r => r.data);
+    },
+  });
+}
+
+export function useSubmitDeclaration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      product_id: string; supplier_name: string; supplier_country: string;
+      origin_country: string; valid_from: string; valid_until: string; declaration_text?: string;
+    }) => apiClient.post("/suppliers/declarations", data).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["declarations"] }),
+  });
+}
+
+export function useUploadDeclarationDoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ declarationId, file }: { declarationId: string; file: File }) => {
+      const form = new FormData();
+      form.append("file", file);
+      return apiClient.post(`/suppliers/declarations/${declarationId}/upload-doc`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      }).then(r => r.data);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["declarations"] }),
+  });
+}
+
 // ─── Billing ──────────────────────────────────────────────────────────────────
 export function useSubscription() {
   return useQuery({
