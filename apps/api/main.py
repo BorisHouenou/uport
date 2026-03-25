@@ -6,7 +6,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from core.config import get_settings
 from middleware.audit import AuditMiddleware
-from routers import agreements, assistant, bom, certificates, health, origin, suppliers, webhooks
+from routers import agreements, assistant, billing, bom, certificates, health, origin, suppliers, webhooks
 
 settings = get_settings()
 
@@ -62,4 +62,5 @@ app.include_router(certificates.router, prefix=API_PREFIX)
 app.include_router(agreements.router, prefix=API_PREFIX)
 app.include_router(suppliers.router, prefix=API_PREFIX)
 app.include_router(assistant.router, prefix=API_PREFIX)
+app.include_router(billing.router, prefix=API_PREFIX)
 app.include_router(webhooks.router, prefix=API_PREFIX)

@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Settings,
   ShieldCheck,
+  CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -64,6 +65,13 @@ export function Sidebar() {
 
       {/* Bottom */}
       <div className="border-t border-slate-200 px-3 py-3">
+        <Link
+          href="/settings/billing"
+          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+        >
+          <CreditCard className="h-4 w-4 text-slate-400" />
+          Billing
+        </Link>
         <Link
           href="/settings"
           className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"

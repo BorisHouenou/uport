@@ -80,3 +80,25 @@ export function useClassifyHS() {
       apiClient.post(`/agreements/classify-hs?description=${encodeURIComponent(description)}`).then(r => r.data),
   });
 }
+
+// ─── Billing ──────────────────────────────────────────────────────────────────
+export function useSubscription() {
+  return useQuery({
+    queryKey: ["subscription"],
+    queryFn: () => apiClient.get("/billing/subscription").then(r => r.data),
+  });
+}
+
+export function useCreateCheckout() {
+  return useMutation({
+    mutationFn: (data: { tier: string; success_url: string; cancel_url: string }) =>
+      apiClient.post("/billing/checkout", data).then(r => r.data),
+  });
+}
+
+export function useCustomerPortal() {
+  return useMutation({
+    mutationFn: (return_url: string) =>
+      apiClient.post("/billing/portal", { return_url }).then(r => r.data),
+  });
+}

@@ -24,6 +24,8 @@ class Organization(Base, TimestampMixin):
     plan: Mapped[str] = mapped_column(String(32), default="starter", nullable=False)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(128), unique=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(128))
+    subscription_tier: Mapped[str] = mapped_column(String(32), default="starter", nullable=False)
+    subscription_status: Mapped[str] = mapped_column(String(32), default="none", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     certificates_used: Mapped[int] = mapped_column(default=0, nullable=False)
     certificates_limit: Mapped[int] = mapped_column(default=10, nullable=False)
