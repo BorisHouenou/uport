@@ -15,10 +15,10 @@ import stripe
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
-from core.config import settings
+from core.config import get_settings
 from models.organization import Organization
 
-stripe.api_key = settings.stripe_secret_key
+stripe.api_key = get_settings().stripe_secret_key
 
 # ──────────────────────────────────────────────
 # Price IDs (set in environment / Stripe dashboard)
