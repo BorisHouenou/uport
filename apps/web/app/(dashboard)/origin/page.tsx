@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OriginWizard } from "@/components/origin/origin-wizard";
 
 export const metadata: Metadata = { title: "Origin Determination" };
 
@@ -7,14 +8,11 @@ export default function OriginPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Origin Determination</h1>
-        <p className="text-slate-500 text-sm mt-1">
-          Determine Rules of Origin compliance across all applicable trade agreements
+        <p className="mt-1 text-sm text-slate-500">
+          Evaluate Rules of Origin across all applicable trade agreements and generate a Certificate of Origin.
         </p>
       </div>
-      {/* Sprint 3–4: OriginWizard component */}
-      <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-400">
-        Origin determination wizard — Sprint 3
-      </div>
+      <OriginWizard />
     </div>
   );
 }
