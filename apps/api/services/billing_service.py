@@ -29,6 +29,17 @@ PRICE_IDS: dict[str, str] = {
     "enterprise": os.getenv("STRIPE_PRICE_ENTERPRISE", "price_enterprise_placeholder"),
 }
 
+# Metered overage price — charged per certificate above plan limit
+# Set STRIPE_PRICE_CERT_OVERAGE in Stripe dashboard (metered, $2/unit)
+PRICE_CERT_OVERAGE: str = os.getenv("STRIPE_PRICE_CERT_OVERAGE", "price_cert_overage_placeholder")
+
+# Included certificates per tier per month (matches certificates_limit in Organization)
+CERT_INCLUDED: dict[str, int] = {
+    "starter": 10,
+    "growth": 50,
+    "enterprise": -1,  # unlimited
+}
+
 TIER_LIMITS: dict[str, dict[str, Any]] = {
     "starter":    {"shipments_per_month": 25,  "users": 3,   "api_access": False},
     "growth":     {"shipments_per_month": 100, "users": 10,  "api_access": True},
@@ -152,6 +163,76 @@ async def handle_invoice_payment_failed(event_data: dict, db: AsyncSession) -> N
             .values(subscription_status="past_due")
         )
         await db.commit()
+
+
+# ──────────────────────────────────────────────
+# Usage-based billing — certificate metering
+# ──────────────────────────────────────────────
+
+async def record_certificate_usage(org_id: str, db: AsyncSession, quantity: int = 1) -> None:
+    """
+    Report certificate usage to Stripe for metered billing.
+
+    Called after every successful certificate generation.
+    Only bills if org is on a paid subscription with overage pricing configured.
+    """
+    result = await db.execute(select(Organization).where(Organization.id == org_id))
+    org = result.scalar_one_or_none()
+    if not org or not org.stripe_subscription_id:
+        return
+
+    tier = getattr(org, "subscription_tier", "free") or "free"
+    included = CERT_INCLUDED.get(tier, 0)
+    if included == -1:
+        return  # enterprise: unlimited, never bill overage
+
+    # Increment usage counter on organization
+    used = getattr(org, "certificates_used", 0) + quantity
+    await db.execute(
+        update(Organization)
+        .where(Organization.id == org_id)
+        .values(certificates_used=used)
+    )
+    await db.commit()
+
+    # Only report to Stripe if overage price is configured
+    if PRICE_CERT_OVERAGE == "price_cert_overage_placeholder":
+        return
+
+    # Find the subscription item with the metered price
+    try:
+        sub = stripe.Subscription.retrieve(org.stripe_subscription_id, expand=["items"])
+        metered_item = next(
+            (item for item in sub["items"]["data"] if item["price"]["id"] == PRICE_CERT_OVERAGE),
+            None,
+        )
+        if metered_item:
+            stripe.SubscriptionItem.create_usage_record(
+                metered_item["id"],
+                quantity=quantity,
+                action="increment",
+            )
+    except stripe.StripeError:
+        pass  # non-blocking — billing errors must never block cert delivery
+
+
+async def get_certificate_usage(org_id: str, db: AsyncSession) -> dict:
+    """Return current month certificate usage and limit for the org."""
+    result = await db.execute(select(Organization).where(Organization.id == org_id))
+    org = result.scalar_one_or_none()
+    if not org:
+        return {"used": 0, "included": 0, "tier": "free"}
+
+    tier = getattr(org, "subscription_tier", "free") or "free"
+    included = CERT_INCLUDED.get(tier, 0)
+    used = getattr(org, "certificates_used", 0)
+    return {
+        "used": used,
+        "included": included,
+        "overage": max(0, used - included) if included != -1 else 0,
+        "tier": tier,
+        "unlimited": included == -1,
+    }
 
 
 # ──────────────────────────────────────────────

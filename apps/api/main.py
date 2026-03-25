@@ -1,12 +1,20 @@
 """Uportai API — FastAPI entrypoint."""
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from core.config import get_settings
 from middleware.audit import AuditMiddleware
-from routers import agreements, assistant, billing, bom, certificates, health, integrations, origin, suppliers, webhooks
+from middleware.security_headers import SecurityHeadersMiddleware
+from routers import (
+    agreements, assistant, audit, billing, bom, certificates,
+    health, integrations, origin, outbound_webhooks, savings, suppliers, webhooks,
+)
 
 settings = get_settings()
 
@@ -22,6 +30,9 @@ structlog.configure(
     ],
 )
 
+# ─── Rate Limiter ─────────────────────────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
 # ─── App ──────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Uportai API",
@@ -32,7 +43,11 @@ app = FastAPI(
     openapi_url="/openapi.json" if not settings.is_production else None,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # ─── Middleware ────────────────────────────────────────────────────────────────
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -64,4 +79,7 @@ app.include_router(suppliers.router, prefix=API_PREFIX)
 app.include_router(assistant.router, prefix=API_PREFIX)
 app.include_router(billing.router, prefix=API_PREFIX)
 app.include_router(integrations.router, prefix=API_PREFIX)
+app.include_router(savings.router, prefix=API_PREFIX)
+app.include_router(audit.router, prefix=API_PREFIX)
+app.include_router(outbound_webhooks.router, prefix=API_PREFIX)
 app.include_router(webhooks.router, prefix=API_PREFIX)

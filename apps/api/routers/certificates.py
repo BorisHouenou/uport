@@ -2,7 +2,9 @@
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
@@ -10,12 +12,15 @@ from middleware.auth import CurrentUser
 from schemas.certificates import CertificateCreate, CertificateResponse, CertificateListResponse
 
 router = APIRouter(prefix="/certificates", tags=["certificates"])
+_limiter = Limiter(key_func=get_remote_address)
 
 CertificateType = Literal["cusma", "eur1", "form_a", "generic"]
 
 
 @router.post("/generate", response_model=CertificateResponse, status_code=201)
+@_limiter.limit("20/minute")
 async def generate_certificate(
+    request: Request,
     payload: CertificateCreate,
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),

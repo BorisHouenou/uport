@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
-import { useSubscription, useCreateCheckout, useCustomerPortal } from "@/hooks/use-api";
+import { useSubscription, useCreateCheckout, useCustomerPortal, useCertificateUsage } from "@/hooks/use-api";
+import { Progress } from "@/components/ui/progress";
 import { CheckCircle2, Zap, Building2, Rocket } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -71,6 +72,7 @@ const PLANS = [
 
 export function PricingPanel() {
   const { data: subscription, isLoading } = useSubscription();
+  const { data: usage } = useCertificateUsage();
   const createCheckout = useCreateCheckout();
   const customerPortal = useCustomerPortal();
   const [upgrading, setUpgrading] = useState<string | null>(null);
@@ -144,6 +146,29 @@ export function PricingPanel() {
             <Button variant="outline" size="sm" onClick={handleManage}>
               Update payment
             </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Certificate usage meter */}
+      {usage && !usage.unlimited && (
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium text-slate-700">Certificates this month</p>
+              <span className="text-sm font-semibold text-slate-900">
+                {usage.used} / {usage.included}
+              </span>
+            </div>
+            <Progress
+              value={usage.included > 0 ? Math.min(100, (usage.used / usage.included) * 100) : 0}
+              color={usage.used >= usage.included ? "red" : usage.used >= usage.included * 0.8 ? "yellow" : "green"}
+            />
+            {usage.overage > 0 && (
+              <p className="mt-1.5 text-xs text-red-600">
+                {usage.overage} certificate{usage.overage !== 1 ? "s" : ""} over limit — billed at $2/each
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

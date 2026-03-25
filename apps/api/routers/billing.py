@@ -72,3 +72,13 @@ async def subscription_info(
     """Return the current subscription tier, status, and limits."""
     from services.billing_service import get_subscription_info
     return await get_subscription_info(current_user["org_id"], db)
+
+
+@router.get("/usage")
+async def certificate_usage(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return current month certificate usage vs. plan included count."""
+    from services.billing_service import get_certificate_usage
+    return await get_certificate_usage(current_user["org_id"], db)

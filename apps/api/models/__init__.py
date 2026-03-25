@@ -9,6 +9,7 @@ from models.certificate import Certificate
 from models.supplier import SupplierDeclaration
 from models.audit import AuditEvent
 from models.agreement import TradeAgreement, RooRule
+from models.webhook import WebhookEndpoint
 
 __all__ = [
     "TimestampMixin",
@@ -23,4 +24,5 @@ __all__ = [
     "AuditEvent",
     "TradeAgreement",
     "RooRule",
+    "WebhookEndpoint",
 ]

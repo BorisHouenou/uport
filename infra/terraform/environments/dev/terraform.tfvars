@@ -1,0 +1,11 @@
+environment        = "dev"
+aws_region         = "ca-central-1"
+vpc_cidr           = "10.1.0.0/16"
+db_name            = "uportai"
+db_username        = "uportai"
+rds_instance_class = "db.t4g.small"
+redis_node_type    = "cache.t4g.micro"
+s3_bucket_name     = "uportai-dev-documents"
+api_cpu            = 256
+api_memory         = 512
+api_desired_count  = 1

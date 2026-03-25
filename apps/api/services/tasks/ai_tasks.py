@@ -37,6 +37,26 @@ def run_origin_determination(self, org_id: str, shipment_id: str, agreement_code
 
         result = _run(shipment_input, shipment_id=shipment_id)
         save_determination_sync(shipment_id, org_id, result)
+
+        # Fire compliance.alert webhook if no agreement qualified
+        if not result.best_agreement or result.overall_result == "fail":
+            try:
+                import asyncio
+                import uuid as _uuid
+                from services.webhook_delivery_service import fire_event_sync
+                asyncio.run(fire_event_sync(
+                    org_id=_uuid.UUID(org_id),
+                    event_type="compliance.alert",
+                    payload={
+                        "shipment_id": shipment_id,
+                        "overall_result": result.overall_result,
+                        "best_agreement": result.best_agreement,
+                        "message": "No qualifying agreement found for this shipment.",
+                    },
+                ))
+            except Exception:
+                pass
+
         return {"status": "completed", "best_agreement": result.best_agreement}
 
     except Exception as exc:

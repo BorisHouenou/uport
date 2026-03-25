@@ -4,12 +4,33 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "prod"
+        type: choice
+        options: [prod, dev]
+
+env:
+  AWS_REGION: ca-central-1
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
 
 jobs:
-  deploy-api:
-    name: Deploy API to AWS ECS
+  # ── 1. CI Gate ──────────────────────────────────────────────────────────────
+  ci:
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
+
+  # ── 2. Build & Push Docker Image ────────────────────────────────────────────
+  build:
+    name: Build & Push API Image
+    needs: ci
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+    outputs:
+      image_uri: ${{ steps.build.outputs.image_uri }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -18,37 +39,215 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ca-central-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push API image
+      - name: Build, tag, and push image
+        id: build
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPO: uportai-${{ env.ENVIRONMENT }}-api
+          TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/uportai-api:$IMAGE_TAG apps/api
-          docker push $ECR_REGISTRY/uportai-api:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/uportai-api:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          docker build \
+            --cache-from "$REGISTRY/$REPO:latest" \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            -t "$REGISTRY/$REPO:$TAG" \
+            -t "$REGISTRY/$REPO:latest" \
+            apps/api
+          docker push "$REGISTRY/$REPO:$TAG"
+          docker push "$REGISTRY/$REPO:latest"
+          echo "image_uri=$REGISTRY/$REPO:$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy to ECS
-        run: |
-          aws ecs update-service \
-            --cluster uportai-production \
-            --service uportai-api \
-            --force-new-deployment
-
-  deploy-web:
-    name: Deploy Web to Vercel
+  # ── 3. Database Migrations ───────────────────────────────────────────────────
+  migrate:
+    name: Run Alembic Migrations
+    needs: build
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run migrations via ECS run-task
+        id: run-task
+        run: |
+          CLUSTER="uportai-${{ env.ENVIRONMENT }}"
+          TASK_DEF="uportai-${{ env.ENVIRONMENT }}-api"
+
+          # Fetch current task definition and strip non-reusable fields
+          TASK_DEF_JSON=$(aws ecs describe-task-definition \
+            --task-definition "$TASK_DEF" \
+            --query 'taskDefinition' \
+            --output json | jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)')
+
+          # Override command to run migrations
+          OVERRIDES=$(jq -n \
+            --arg image "${{ needs.build.outputs.image_uri }}" \
+            '{containerOverrides:[{name:"api",image:$image,command:["alembic","upgrade","head"]}]}')
+
+          # Get private subnet and ECS security group from SSM
+          SUBNET=$(aws ssm get-parameter \
+            --name "/uportai/${{ env.ENVIRONMENT }}/private_subnet_id" \
+            --query 'Parameter.Value' --output text)
+          SG=$(aws ssm get-parameter \
+            --name "/uportai/${{ env.ENVIRONMENT }}/ecs_security_group_id" \
+            --query 'Parameter.Value' --output text)
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$TASK_DEF" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+            --overrides "$OVERRIDES" \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "task_arn=$TASK_ARN" >> "$GITHUB_OUTPUT"
+          echo "Waiting for migration task: $TASK_ARN"
+
+      - name: Wait for migration to complete
+        run: |
+          CLUSTER="uportai-${{ env.ENVIRONMENT }}"
+          TASK_ARN="${{ steps.run-task.outputs.task_arn }}"
+
+          aws ecs wait tasks-stopped \
+            --cluster "$CLUSTER" \
+            --tasks "$TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER" \
+            --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          echo "Migration exit code: $EXIT_CODE"
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed with exit code $EXIT_CODE"
+            exit 1
+          fi
+
+  # ── 4. Deploy ECS Services ───────────────────────────────────────────────────
+  deploy-ecs:
+    name: Deploy ECS Services
+    needs: [build, migrate]
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Render API task definition
+        id: render-api
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition-family: uportai-${{ env.ENVIRONMENT }}-api
+          container-name: api
+          image: ${{ needs.build.outputs.image_uri }}
+
+      - name: Deploy API service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-api.outputs.task-definition }}
+          service: uportai-${{ env.ENVIRONMENT }}-api
+          cluster: uportai-${{ env.ENVIRONMENT }}
+          wait-for-service-stability: true
+
+      - name: Render worker task definition
+        id: render-worker
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition-family: uportai-${{ env.ENVIRONMENT }}-worker
+          container-name: worker
+          image: ${{ needs.build.outputs.image_uri }}
+
+      - name: Deploy worker service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-worker.outputs.task-definition }}
+          service: uportai-${{ env.ENVIRONMENT }}-worker
+          cluster: uportai-${{ env.ENVIRONMENT }}
+          wait-for-service-stability: true
+
+  # ── 5. Deploy Frontend (prod only) ──────────────────────────────────────────
+  deploy-vercel:
+    name: Deploy Frontend to Vercel
+    needs: deploy-ecs
+    runs-on: ubuntu-latest
+    if: github.event.inputs.environment == 'prod' || github.event_name == 'push'
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm i -g vercel
-      - run: vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Deploy to Vercel
         working-directory: apps/web
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel deploy --prod --token="$VERCEL_TOKEN"
+
+  # ── 6. Smoke Test ────────────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke Test
+    needs: [deploy-ecs, deploy-vercel]
+    if: always() && needs.deploy-ecs.result == 'success'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get API URL from SSM
+        id: api-url
+        run: |
+          URL=$(aws ssm get-parameter \
+            --name "/uportai/${{ env.ENVIRONMENT }}/api_url" \
+            --query 'Parameter.Value' --output text)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Health check (5 retries, 10s apart)
+        run: |
+          URL="${{ steps.api-url.outputs.url }}"
+          for i in 1 2 3 4 5; do
+            echo "Attempt $i: GET $URL/health"
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "HTTP $STATUS — waiting 10s..."
+            sleep 10
+          done
+          echo "Health check failed after 5 attempts"
+          exit 1

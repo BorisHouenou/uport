@@ -59,10 +59,10 @@ DECL_STYLE   = _style("Normal", fontSize=7.5, textColor=BLACK, alignment=TA_JUST
 FIELD_LABEL  = _style("Normal", fontSize=6.5, textColor=TEXT_GREY, fontName="Helvetica-Oblique")
 
 
-def generate_certificate(data: CertificateData) -> bytes:
+def generate_certificate(data: CertificateData, sign: bool = True) -> bytes:
     """
     Dispatch to the appropriate certificate renderer.
-    Returns PDF bytes.
+    Returns signed PDF bytes (or unsigned if signing keys are unavailable).
     """
     dispatch = {
         "cusma":   _generate_cusma,
@@ -71,7 +71,14 @@ def generate_certificate(data: CertificateData) -> bytes:
         "generic": _generate_generic,
     }
     renderer = dispatch.get(data.cert_type, _generate_generic)
-    return renderer(data)
+    pdf_bytes = renderer(data)
+
+    if sign:
+        from signer import sign_pdf
+        reason = f"Uportai Certificate of Origin — {data.cert_type.upper()} {data.cert_number}"
+        pdf_bytes = sign_pdf(pdf_bytes, reason=reason)
+
+    return pdf_bytes
 
 
 # ─── CUSMA / USMCA ────────────────────────────────────────────────────────────

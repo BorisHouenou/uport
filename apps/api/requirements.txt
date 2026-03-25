@@ -47,6 +47,8 @@ email-validator==2.2.0
 cryptography==43.0.3
 passlib[bcrypt]==1.7.4
 python-dotenv==1.0.1
+pyhanko[pkcs12]==0.21.0
+slowapi==0.1.9
 
 # ─── Observability ──────────────────────────────────────────
 structlog==24.4.0

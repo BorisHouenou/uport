@@ -12,6 +12,7 @@ celery_app = Celery(
         "services.tasks.bom_tasks",
         "services.tasks.certificate_tasks",
         "services.tasks.ai_tasks",
+        "services.tasks.webhook_tasks",
     ],
 )
 
@@ -25,4 +26,10 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     result_expires=3600,
+    beat_schedule={
+        "check-expired-declarations-daily": {
+            "task": "webhook_tasks.fire_expired_declarations",
+            "schedule": 86400,  # every 24 hours
+        },
+    },
 )

@@ -57,6 +57,29 @@ async def list_org_certificates(
     return {"certificates": certs, "total": len(certs), "page": page, "page_size": page_size}
 
 
+def _report_cert_usage_sync(org_id: str, stripe_sub_id: str | None) -> None:
+    """Report one certificate unit to Stripe metered billing (sync, Celery-safe)."""
+    if not stripe_sub_id:
+        return
+    import stripe as stripe_lib
+    from services.billing_service import PRICE_CERT_OVERAGE
+    if PRICE_CERT_OVERAGE == "price_cert_overage_placeholder":
+        return
+    stripe_lib.api_key = settings.stripe_secret_key
+    try:
+        sub = stripe_lib.Subscription.retrieve(stripe_sub_id, expand=["items"])
+        metered_item = next(
+            (item for item in sub["items"]["data"] if item["price"]["id"] == PRICE_CERT_OVERAGE),
+            None,
+        )
+        if metered_item:
+            stripe_lib.SubscriptionItem.create_usage_record(
+                metered_item["id"], quantity=1, action="increment"
+            )
+    except Exception:
+        pass
+
+
 def generate_and_store_certificate_sync(
     org_id: str,
     shipment_id: str,
@@ -87,9 +110,9 @@ def generate_and_store_certificate_sync(
         # Build CertificateData
         cert_data = _build_cert_data(ship, det, org, product, cert_type)
 
-        # Generate PDF
+        # Generate PDF (with digital signature)
         from generator import generate_certificate
-        pdf_bytes = generate_certificate(cert_data)
+        pdf_bytes = generate_certificate(cert_data, sign=True)
 
         # Store to S3 (or local fallback)
         s3_key = f"certificates/{org_id}/{shipment_id}/{cert_data.cert_number}.pdf"
@@ -111,9 +134,33 @@ def generate_and_store_certificate_sync(
         )
         session.add(cert)
 
-        # Increment org certificate counter
+        # Increment org certificate counter + report Stripe usage (best-effort)
         org.certificates_used = (org.certificates_used or 0) + 1
         session.commit()
+
+        # Report to Stripe metered billing (sync, non-blocking)
+        try:
+            _report_cert_usage_sync(org_id=org_id, stripe_sub_id=getattr(org, "stripe_subscription_id", None))
+        except Exception:
+            pass
+
+        # Fire outbound webhook (sync wrapper — Celery-safe)
+        try:
+            import asyncio
+            from services.webhook_delivery_service import fire_event_sync
+            asyncio.run(fire_event_sync(
+                org_id=uuid.UUID(org_id),
+                event_type="certificate.issued",
+                payload={
+                    "certificate_id": str(cert.id),
+                    "cert_type": cert_type,
+                    "cert_number": cert_number,
+                    "shipment_id": shipment_id,
+                    "pdf_url": pdf_url,
+                },
+            ))
+        except Exception:
+            pass
 
         return {"certificate_id": str(cert.id), "pdf_url": pdf_url}
 

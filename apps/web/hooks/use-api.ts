@@ -140,3 +140,19 @@ export function useCustomerPortal() {
       apiClient.post("/billing/portal", { return_url }).then(r => r.data),
   });
 }
+
+export function useCertificateUsage() {
+  return useQuery({
+    queryKey: ["cert-usage"],
+    queryFn: () => apiClient.get("/billing/usage").then(r => r.data),
+  });
+}
+
+// ─── Savings ──────────────────────────────────────────────────────────────────
+export function useSavingsSummary() {
+  return useQuery({
+    queryKey: ["savings-summary"],
+    queryFn: () => apiClient.get("/savings/summary").then(r => r.data),
+    staleTime: 5 * 60 * 1000, // 5 min — savings data doesn't change that fast
+  });
+}

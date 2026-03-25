@@ -1,7 +1,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import Date, ForeignKey, String, Text
+from sqlalchemy import Boolean, Date, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,3 +27,4 @@ class SupplierDeclaration(Base, TimestampMixin):
     declaration_text: Mapped[str | None] = mapped_column(Text)
     doc_url: Mapped[str | None] = mapped_column(Text)
     s3_key: Mapped[str | None] = mapped_column(Text)
+    notified_expired: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

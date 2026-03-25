@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import json
+import asyncio
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -208,12 +209,83 @@ If the retrieved context does not contain sufficient information, say so clearly
 Format responses with clear structure: use short paragraphs, bullet points for lists, and bold key terms."""
 
 
-def _retrieve(query: str, agreement_filter: list[str] | None, k: int = 6) -> list[dict]:
+async def _retrieve_pgvector(
+    query: str,
+    agreement_filter: list[str] | None,
+    k: int,
+) -> list[dict] | None:
     """
-    Retrieve relevant knowledge base chunks for a query.
-    In production: calls pgvector similarity search via LlamaIndex.
-    In dev: keyword-based retrieval from in-memory KNOWLEDGE_BASE.
+    Retrieve via pgvector cosine similarity.
+    Returns None if pgvector is unavailable (missing env vars or connection error).
     """
+    database_url = os.getenv("DATABASE_URL")
+    voyage_key = os.getenv("VOYAGE_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
+
+    if not database_url or (not voyage_key and not openai_key):
+        return None
+
+    try:
+        import asyncpg
+        import httpx
+
+        # Embed the query
+        if voyage_key:
+            async with httpx.AsyncClient(timeout=15) as http:
+                resp = await http.post(
+                    "https://api.voyageai.com/v1/embeddings",
+                    headers={"Authorization": f"Bearer {voyage_key}"},
+                    json={"model": "voyage-3", "input": [query]},
+                )
+                resp.raise_for_status()
+                embedding = resp.json()["data"][0]["embedding"]
+        else:
+            import base64
+            async with httpx.AsyncClient(timeout=15) as http:
+                resp = await http.post(
+                    "https://api.openai.com/v1/embeddings",
+                    headers={"Authorization": f"Bearer {openai_key}"},
+                    json={"model": "text-embedding-3-small", "input": [query]},
+                )
+                resp.raise_for_status()
+                embedding = resp.json()["data"][0]["embedding"]
+
+        dsn = database_url.replace("postgresql+asyncpg://", "postgresql://").replace("postgresql://", "postgres://")
+        conn = await asyncpg.connect(dsn)
+
+        try:
+            where_clause = ""
+            params: list[Any] = [str(embedding), k]
+            if agreement_filter:
+                placeholders = ", ".join(f"${i+3}" for i in range(len(agreement_filter)))
+                where_clause = f"WHERE agreement IN ({placeholders}) OR agreement = 'general'"
+                params.extend(agreement_filter)
+
+            rows = await conn.fetch(
+                f"""
+                SELECT agreement, source, content,
+                       1 - (embedding <=> $1::vector) AS similarity
+                FROM document_chunks
+                {where_clause}
+                ORDER BY embedding <=> $1::vector
+                LIMIT $2
+                """,
+                *params,
+            )
+        finally:
+            await conn.close()
+
+        return [
+            {"agreement": r["agreement"], "source": r["source"], "content": r["content"]}
+            for r in rows
+        ]
+
+    except Exception:
+        return None  # fall through to keyword search
+
+
+def _retrieve_keyword(query: str, agreement_filter: list[str] | None, k: int) -> list[dict]:
+    """Keyword-based retrieval from in-memory KNOWLEDGE_BASE (dev fallback)."""
     query_lower = query.lower()
     keywords = [w for w in query_lower.split() if len(w) > 3]
 
@@ -228,6 +300,41 @@ def _retrieve(query: str, agreement_filter: list[str] | None, k: int = 6) -> lis
 
     scored.sort(key=lambda x: -x[0])
     return [c for _, c in scored[:k]]
+
+
+def _retrieve(query: str, agreement_filter: list[str] | None, k: int = 6) -> list[dict]:
+    """
+    Retrieve relevant chunks for a query.
+    Uses pgvector cosine similarity in production; falls back to keyword search in dev.
+    Synchronous wrapper — runs the async pgvector path in a new event loop if needed.
+    """
+    if not query.strip():
+        return []
+
+    # Try pgvector (async) — run inside existing loop or create one
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We're already inside an async context; pgvector will be called
+            # from stream_compliance_answer which is async — see _retrieve_async below
+            raise RuntimeError("use _retrieve_async instead")
+        result = loop.run_until_complete(_retrieve_pgvector(query, agreement_filter, k))
+        if result is not None:
+            return result
+    except Exception:
+        pass
+
+    return _retrieve_keyword(query, agreement_filter, k)
+
+
+async def _retrieve_async(query: str, agreement_filter: list[str] | None, k: int = 6) -> list[dict]:
+    """Async version of _retrieve — preferred inside async contexts."""
+    if not query.strip():
+        return []
+    result = await _retrieve_pgvector(query, agreement_filter, k)
+    if result is not None:
+        return result
+    return _retrieve_keyword(query, agreement_filter, k)
 
 
 def _build_context(chunks: list[dict]) -> str:
@@ -254,8 +361,8 @@ async def stream_compliance_answer(
     user_messages = [m for m in messages if m.get("role") == "user"]
     last_query = user_messages[-1]["content"] if user_messages else ""
 
-    # Retrieve context
-    chunks = _retrieve(last_query, agreement_filter)
+    # Retrieve context (pgvector in prod, keyword in dev)
+    chunks = await _retrieve_async(last_query, agreement_filter)
     context = _build_context(chunks)
 
     # Prepend context to conversation
@@ -284,6 +391,58 @@ async def stream_compliance_answer(
         yield json.dumps({"type": "citations", "citations": citations})
 
 
+async def save_chat_turn(
+    db,
+    org_id: str,
+    user_id: str,
+    user_content: str,
+    assistant_content: str,
+    citations: list[dict] | None = None,
+) -> None:
+    """Persist one user + assistant turn to chat_messages."""
+    from sqlalchemy import text
+    import uuid as _uuid
+
+    await db.execute(
+        text("""
+            INSERT INTO chat_messages (id, org_id, user_id, role, content, citations)
+            VALUES (:id1, :org_id, :user_id, 'user', :user_content, NULL),
+                   (:id2, :org_id, :user_id, 'assistant', :assistant_content, :citations::jsonb)
+        """),
+        {
+            "id1": str(_uuid.uuid4()),
+            "id2": str(_uuid.uuid4()),
+            "org_id": org_id,
+            "user_id": user_id,
+            "user_content": user_content,
+            "assistant_content": assistant_content,
+            "citations": json.dumps(citations) if citations else None,
+        },
+    )
+    await db.commit()
+
+
 async def get_chat_history(db, user_id: str, limit: int = 50) -> list[dict]:
-    """Retrieve recent chat messages for a user. Sprint 9: persist to DB."""
-    return []  # TODO: implement DB persistence in Sprint 9
+    """Retrieve recent chat messages for a user from DB."""
+    from sqlalchemy import text
+
+    result = await db.execute(
+        text("""
+            SELECT role, content, citations, created_at
+            FROM chat_messages
+            WHERE user_id = :user_id
+            ORDER BY created_at DESC
+            LIMIT :limit
+        """),
+        {"user_id": user_id, "limit": limit},
+    )
+    rows = result.fetchall()
+    return [
+        {
+            "role": r.role,
+            "content": r.content,
+            "citations": r.citations,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in reversed(rows)  # chronological order
+    ]
