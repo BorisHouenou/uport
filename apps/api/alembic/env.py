@@ -15,8 +15,9 @@ import models  # noqa: F401
 config = context.config
 settings = get_settings()
 
-# Override the DB URL from settings (respects .env)
-config.set_main_option("sqlalchemy.url", settings.database_url_sync)
+# Use sync URL for offline mode, async URL for online mode
+# (async_engine_from_config requires an async driver like asyncpg)
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -25,7 +26,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    url = settings.database_url_sync
     context.configure(
         url=url,
         target_metadata=target_metadata,
