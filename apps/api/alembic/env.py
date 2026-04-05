@@ -15,9 +15,9 @@ import models  # noqa: F401
 config = context.config
 settings = get_settings()
 
-# Use sync URL for offline mode, async URL for online mode
-# (async_engine_from_config requires an async driver like asyncpg)
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# asyncpg doesn't accept ?sslmode=require (psycopg2 syntax); replace with ?ssl=require
+_async_url = settings.database_url.replace("?sslmode=require", "?ssl=require")
+config.set_main_option("sqlalchemy.url", _async_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
