@@ -35,8 +35,8 @@ async def get_roo_rules(
 
 @router.post("/classify-hs", response_model=HSCodeClassification)
 async def classify_hs_code(
-    description: str = Query(..., description="Product description for AI classification"),
     current_user: CurrentUser,
+    description: str = Query(..., description="Product description for AI classification"),
 ):
     """
     AI-powered HS code classification from a product description.
