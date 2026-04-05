@@ -153,7 +153,7 @@ export function ChatPanel() {
             )}
             {streaming && messages[messages.length - 1]?.content === "" && (
               <div className="flex items-center gap-2 text-xs text-slate-400">
-                <Spinner size="sm" />
+                <Spinner className="h-3 w-3" />
                 Thinking…
               </div>
             )}
@@ -177,7 +177,7 @@ export function ChatPanel() {
                 className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
               />
               <Button type="submit" disabled={!input.trim() || streaming} className="shrink-0">
-                {streaming ? <Spinner size="sm" /> : <Send className="h-4 w-4" />}
+                {streaming ? <Spinner className="h-3 w-3" /> : <Send className="h-4 w-4" />}
               </Button>
             </form>
           </div>

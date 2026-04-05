@@ -121,7 +121,7 @@ export function DeclarationsTable() {
                       ) : (
                         <label className="inline-flex cursor-pointer items-center gap-1 text-xs text-slate-400 hover:text-brand-600">
                           <Upload className="h-3.5 w-3.5" />
-                          {uploadingId === d.id ? <Spinner size="sm" /> : "Upload"}
+                          {uploadingId === d.id ? <Spinner className="h-3 w-3" /> : "Upload"}
                           <input
                             type="file"
                             className="sr-only"
