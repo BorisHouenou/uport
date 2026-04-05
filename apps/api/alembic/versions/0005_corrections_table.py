@@ -35,7 +35,8 @@ def upgrade() -> None:
         sa.Column("exported_at",        sa.DateTime(timezone=True)),  # null = not yet exported
         sa.Column("created_at",         sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
-    op.create_index("ix_human_corrections_org_id", "human_corrections", ["org_id"])
+    # ix_human_corrections_org_id already created by index=True on org_id column
+    # ix_human_corrections_determination_id already created by index=True on determination_id column
     op.create_index("ix_human_corrections_exported_at", "human_corrections", ["exported_at"])
 
 
