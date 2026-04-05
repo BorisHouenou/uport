@@ -23,8 +23,6 @@ ORG_ID_TABLES = [
     "supplier_declarations",
     "audit_events",
     "webhook_endpoints",
-    "chat_messages",
-    "document_chunks",
     "integration_tokens",
 ]
 
