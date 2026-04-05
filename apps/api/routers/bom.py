@@ -18,7 +18,7 @@ MAX_FILE_SIZE_MB = 10
 async def upload_bom(
     product_id: uuid.UUID,
     file: UploadFile = File(...),
-    current_user: CurrentUser = Depends(),
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     """

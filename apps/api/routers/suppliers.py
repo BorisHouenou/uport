@@ -30,7 +30,7 @@ async def submit_declaration(
 async def upload_supporting_document(
     declaration_id: uuid.UUID,
     file: UploadFile = File(...),
-    current_user: CurrentUser = Depends(),
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     """Attach a supporting document (e.g., supplier cert) to a declaration."""
