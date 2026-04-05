@@ -29,7 +29,7 @@ def upgrade() -> None:
         sa.Column("created_at",  sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at",  sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
-    op.create_index("ix_webhook_endpoints_org_id", "webhook_endpoints", ["org_id"])
+    # index already created by index=True on the org_id column above
 
     # ── supplier_declarations.notified_expired ─────────────────────────────────
     op.add_column(
@@ -40,4 +40,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column("supplier_declarations", "notified_expired")
+    op.drop_index("ix_webhook_endpoints_org_id", table_name="webhook_endpoints")
     op.drop_table("webhook_endpoints")
