@@ -17,8 +17,8 @@ MAX_FILE_SIZE_MB = 10
 @router.post("/upload", response_model=BOMUploadResponse, status_code=201)
 async def upload_bom(
     product_id: uuid.UUID,
-    file: UploadFile = File(...),
     current_user: CurrentUser,
+    file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
     """

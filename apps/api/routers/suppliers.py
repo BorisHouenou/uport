@@ -29,8 +29,8 @@ async def submit_declaration(
 @router.post("/declarations/{declaration_id}/upload-doc")
 async def upload_supporting_document(
     declaration_id: uuid.UUID,
-    file: UploadFile = File(...),
     current_user: CurrentUser,
+    file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
     """Attach a supporting document (e.g., supplier cert) to a declaration."""
