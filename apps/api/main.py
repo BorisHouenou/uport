@@ -19,8 +19,11 @@ from routers import (
 settings = get_settings()
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
+import logging as _logging
 structlog.configure(
-    wrapper_class=structlog.make_filtering_bound_logger(settings.log_level),
+    wrapper_class=structlog.make_filtering_bound_logger(
+        _logging.getLevelName(settings.log_level)
+    ),
     processors=[
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
