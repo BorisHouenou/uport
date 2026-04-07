@@ -37,15 +37,27 @@ async def get_current_user(
         )
 
     # Resolve Clerk org ID → internal org UUID
+    # Falls back to looking up by user's own record if no org in JWT
     internal_org_id: str | None = None
+    from models.organization import Organization
+    from models.user import User
+
     if clerk_org_id:
-        from models.organization import Organization
         result = await db.execute(
             select(Organization).where(Organization.clerk_org_id == clerk_org_id)
         )
         org = result.scalar_one_or_none()
         if org:
             internal_org_id = str(org.id)
+
+    if not internal_org_id:
+        # Personal session — look up org via user record
+        result = await db.execute(
+            select(User).where(User.clerk_user_id == clerk_user_id)
+        )
+        user_row = result.scalar_one_or_none()
+        if user_row:
+            internal_org_id = str(user_row.org_id)
 
     # Stamp on request.state for get_db() RLS context
     request.state.org_id = internal_org_id
