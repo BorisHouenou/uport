@@ -239,13 +239,20 @@ async def get_determination(
     if not det:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Determination not found")
 
-    # Fetch ALL determinations for this shipment
+    # Fetch ALL determinations for this shipment, deduplicated to latest per agreement
     all_dets_result = await db.execute(
         select(OriginDetermination)
         .where(OriginDetermination.shipment_id == det.shipment_id)
-        .order_by(OriginDetermination.created_at.asc())
+        .order_by(OriginDetermination.agreement_code, OriginDetermination.created_at.desc())
     )
-    all_dets = all_dets_result.scalars().all()
+    all_rows = all_dets_result.scalars().all()
+    # Keep only the most recent determination per agreement code
+    seen: set[str] = set()
+    all_dets = []
+    for d in all_rows:
+        if d.agreement_code not in seen:
+            seen.add(d.agreement_code)
+            all_dets.append(d)
 
     best = next((d for d in all_dets if d.result == "pass"), None)
     total_savings = sum(float(d.savings_per_unit or 0) for d in all_dets if d.result == "pass")
