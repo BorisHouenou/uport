@@ -62,23 +62,7 @@ async def determine_origin(
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
 
-    # Try Celery first; fall back to inline sync execution
     task_id = str(uuid.uuid4())
-    try:
-        from services.tasks.ai_tasks import run_origin_determination
-        task = run_origin_determination.delay(
-            org_id=org_id,
-            shipment_id=str(shipment_id),
-            agreement_codes=payload.agreement_codes,
-        )
-        task_id = task.id
-        return OriginDeterminationResponse(
-            task_id=task_id,
-            status="queued",
-            shipment_id=shipment_id,
-        )
-    except Exception:
-        pass  # Celery unavailable — run inline below
 
     # ── Inline determination (no Celery worker required) ──────────────────────
     from models import Product, BOMItem
