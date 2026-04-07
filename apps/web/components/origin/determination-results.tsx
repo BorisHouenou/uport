@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@clerk/nextjs";
 import { useDetermination, useGenerateCertificate } from "@/hooks/use-api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +30,7 @@ function ResultBadge({ result }: { result: string }) {
 export function DeterminationResults({ determinationId }: DeterminationResultsProps) {
   const { data, isLoading } = useDetermination(determinationId);
   const generateCert = useGenerateCertificate();
+  const { getToken } = useAuth();
 
   if (isLoading || !data) return <PageSpinner />;
 
@@ -38,12 +40,30 @@ export function DeterminationResults({ determinationId }: DeterminationResultsPr
 
   const handleGenerateCert = async (agreement: string) => {
     try {
-      await generateCert.mutateAsync({
+      const cert = await generateCert.mutateAsync({
         shipment_id: data.shipment_id,
         determination_id: determinationId,
         cert_type: agreement === "ceta" ? "eur1" : "cusma",
-      });
-      toast.success("Certificate generated — check the Certificates page");
+      }) as any;
+
+      toast.success("Certificate generated — downloading PDF…");
+
+      // Download the PDF immediately
+      if (cert?.certificate_id) {
+        const token = await getToken();
+        const res = await fetch(`/api/v1/certificates/${cert.certificate_id}/download`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `certificate_${cert.certificate_id}.pdf`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      }
     } catch {
       toast.error("Certificate generation failed");
     }

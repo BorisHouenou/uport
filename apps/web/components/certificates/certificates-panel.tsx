@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { useCertificates } from "@/hooks/use-api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -27,9 +28,24 @@ const STATUS_VARIANT: Record<string, "success" | "warning" | "destructive" | "ou
 export function CertificatesPanel() {
   const [page, setPage] = useState(1);
   const { data, isLoading, refetch } = useCertificates(page);
+  const { getToken } = useAuth();
 
-  const handleDownload = async (certId: string) => {
-    window.open(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/certificates/${certId}/download`, "_blank");
+  const handleDownload = async (certId: string, certNumber?: string) => {
+    const token = await getToken();
+    const res = await fetch(`/api/v1/certificates/${certId}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      alert("Download failed — please try again");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `certificate_${certNumber ?? certId}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   if (isLoading) return <PageSpinner />;
@@ -113,7 +129,7 @@ export function CertificatesPanel() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDownload(cert.id)}
+                        onClick={() => handleDownload(cert.id, cert.cert_number)}
                         disabled={cert.status === "draft"}
                       >
                         <Download className="h-3.5 w-3.5" /> PDF
