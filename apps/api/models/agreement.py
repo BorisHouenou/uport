@@ -1,7 +1,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import Boolean, Date, Float, String, Text
+from sqlalchemy import Boolean, Date, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,7 +29,7 @@ class RooRule(Base, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     agreement_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("trade_agreements.id", ondelete="CASCADE"), nullable=False, index=True
     )
     hs_chapter: Mapped[str | None] = mapped_column(String(2), index=True)
     hs_heading: Mapped[str | None] = mapped_column(String(4), index=True)
