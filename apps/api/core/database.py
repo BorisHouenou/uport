@@ -10,8 +10,13 @@ from core.config import get_settings
 
 settings = get_settings()
 
+# asyncpg requires ssl=require not sslmode=require — normalise the URL
+_db_url = settings.database_url.replace("?sslmode=require", "?ssl=require").replace(
+    "&sslmode=require", "&ssl=require"
+)
+
 engine = create_async_engine(
-    settings.database_url,
+    _db_url,
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,
     echo=not settings.is_production,
