@@ -140,7 +140,7 @@ async def determine_origin(
     total_savings = sum(d.savings_per_unit or 0 for d in determinations if d.result == "pass")
 
     return OriginDeterminationResponse(
-        task_id=task_id,
+        task_id=str(determinations[0].id),  # real ID so GET /origin/{id} resolves
         status="completed",
         shipment_id=shipment_id,
         results=[
@@ -241,12 +241,54 @@ async def get_determination(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """Retrieve a completed origin determination with full reasoning."""
-    from services.origin_service import get_determination_by_id
-    result = await get_determination_by_id(db, determination_id, current_user["org_id"])
-    if not result:
+    """Retrieve all determinations for the shipment associated with this determination ID."""
+    org_id = current_user["org_id"]
+
+    # Look up the anchor determination to get shipment_id
+    anchor = await db.execute(
+        select(OriginDetermination)
+        .join(Shipment, OriginDetermination.shipment_id == Shipment.id)
+        .where(OriginDetermination.id == determination_id)
+        .where(Shipment.org_id == uuid.UUID(org_id))
+    )
+    det = anchor.scalar_one_or_none()
+    if not det:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Determination not found")
-    return result
+
+    # Fetch ALL determinations for this shipment
+    all_dets_result = await db.execute(
+        select(OriginDetermination)
+        .where(OriginDetermination.shipment_id == det.shipment_id)
+        .order_by(OriginDetermination.created_at.asc())
+    )
+    all_dets = all_dets_result.scalars().all()
+
+    best = next((d for d in all_dets if d.result == "pass"), None)
+    total_savings = sum(float(d.savings_per_unit or 0) for d in all_dets if d.result == "pass")
+
+    return {
+        "id": str(det.id),
+        "shipment_id": str(det.shipment_id),
+        "status": "completed",
+        "results": [
+            {
+                "agreement_code": d.agreement_code,
+                "agreement_name": d.agreement_name,
+                "rule_applied": d.rule_applied,
+                "rule_text": d.rule_text or "",
+                "result": d.result,
+                "confidence": float(d.confidence),
+                "reasoning": d.reasoning or "",
+                "preferential_rate": d.preferential_rate,
+                "mfn_rate": d.mfn_rate,
+                "savings_per_unit": float(d.savings_per_unit or 0),
+            }
+            for d in all_dets
+        ],
+        "best_agreement": best.agreement_code if best else None,
+        "total_savings_usd": total_savings,
+        "reviewed_by": det.reviewed_by,
+    }
 
 
 @router.post("/{determination_id}/correction", status_code=201)
