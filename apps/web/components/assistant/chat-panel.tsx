@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -17,6 +18,7 @@ const STARTERS = [
 ];
 
 export function ChatPanel() {
+  const { getToken } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [filter, setFilter] = useState<string[]>([]);
@@ -47,9 +49,13 @@ export function ChatPanel() {
     abortRef.current = ctrl;
 
     try {
+      const token = await getToken();
       const resp = await fetch("/api/v1/assistant/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           messages: [...messages, userMsg].map((m) => ({ role: m.role, content: m.content })),
           agreement_filter: filter.length ? filter : null,

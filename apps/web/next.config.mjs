@@ -7,6 +7,15 @@ const nextConfig = {
       { protocol: "https", hostname: "uportai-documents.s3.ca-central-1.amazonaws.com" },
     ],
   },
+  async rewrites() {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${apiUrl}/api/v1/:path*`,
+      },
+    ];
+  },
   async headers() {
     return [
       {
