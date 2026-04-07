@@ -50,10 +50,12 @@ async def determine_origin(
     shipment_id = payload.shipment_id
 
     # Verify the shipment exists and belongs to this org
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No organization associated with this account")
     ship_result = await db.execute(
         select(Shipment).where(
             Shipment.id == shipment_id,
-            Shipment.org_id == uuid.UUID(org_id) if org_id else False,
+            Shipment.org_id == uuid.UUID(org_id),
         )
     )
     shipment = ship_result.scalar_one_or_none()
@@ -80,7 +82,6 @@ async def determine_origin(
 
     # ── Inline determination (no Celery worker required) ──────────────────────
     from models import Product, BOMItem
-    from services.rag_service import stream_compliance_answer
 
     product = None
     if shipment.product_id:
