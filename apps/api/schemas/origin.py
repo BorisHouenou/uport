@@ -41,7 +41,7 @@ class OriginQueryRequest(UportaiBase):
     pass
 
 
-class OriginQueryResponse(TimestampMixin):
+class OriginQueryResponse(UportaiBase):
     id: uuid.UUID
     shipment_id: uuid.UUID
     status: DeterminationStatus
