@@ -1,9 +1,15 @@
 import axios from "axios";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Use relative URL in browser so requests flow through the Vercel rewrite proxy
+// (/api/v1/* → NEXT_PUBLIC_API_URL/api/v1/*), avoiding CSP and CORS issues.
+// Fall back to absolute URL for SSR contexts.
+const API_BASE =
+  typeof window !== "undefined"
+    ? "/api/v1"
+    : `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1`;
 
 export const apiClient = axios.create({
-  baseURL: `${API_URL}/api/v1`,
+  baseURL: API_BASE,
   headers: { "Content-Type": "application/json" },
 });
 
