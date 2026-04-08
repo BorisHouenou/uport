@@ -27,9 +27,11 @@ class CertificateSummary(TimestampMixin):
     id: uuid.UUID
     shipment_id: uuid.UUID
     cert_type: CertType
-    pdf_url: str
-    issued_at: datetime
-    valid_until: datetime | None
+    cert_number: str | None = None
+    pdf_url: str | None = None
+    issued_at: datetime | None = None
+    valid_until: datetime | None = None
+    status: str = "issued"
 
 
 class CertificateListResponse(UportaiBase):

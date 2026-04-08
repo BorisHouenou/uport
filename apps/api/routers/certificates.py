@@ -382,5 +382,36 @@ async def list_certificates(
     page_size: int = 20,
 ):
     """List all certificates for the organization."""
-    from services.certificate_service import list_org_certificates
-    return await list_org_certificates(db, current_user["org_id"], page, page_size)
+    from sqlalchemy import func
+    org_id = uuid.UUID(current_user["org_id"])
+    offset = (page - 1) * page_size
+
+    q = (
+        select(Certificate)
+        .join(Shipment, Certificate.shipment_id == Shipment.id)
+        .where(Shipment.org_id == org_id)
+        .order_by(Certificate.created_at.desc())
+    )
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
+    rows = (await db.execute(q.offset(offset).limit(page_size))).scalars().all()
+
+    return {
+        "certificates": [
+            {
+                "id": str(c.id),
+                "shipment_id": str(c.shipment_id),
+                "cert_type": c.cert_type,
+                "cert_number": c.cert_number,
+                "pdf_url": c.pdf_url or "",
+                "issued_at": c.issued_at,
+                "valid_until": c.valid_until,
+                "status": c.status,
+                "created_at": c.created_at,
+                "updated_at": c.updated_at,
+            }
+            for c in rows
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
