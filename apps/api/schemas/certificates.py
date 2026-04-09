@@ -23,7 +23,7 @@ class CertificateResponse(TaskResponse):
     valid_until: datetime | None = None
 
 
-class CertificateSummary(TimestampMixin):
+class CertificateSummary(UportaiBase):
     id: uuid.UUID
     shipment_id: uuid.UUID
     cert_type: CertType
