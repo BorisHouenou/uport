@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { Bot, User } from "lucide-react";
+import { Bot, User, ChevronDown, ChevronUp, BookOpen } from "lucide-react";
 
 export interface Citation {
   index: number;
@@ -21,53 +22,73 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
+  const [sourcesOpen, setSourcesOpen] = useState(false);
 
   return (
     <div className={cn("flex gap-3", isUser ? "flex-row-reverse" : "flex-row")}>
       {/* Avatar */}
       <div
         className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-          isUser ? "bg-brand-600" : "bg-slate-100"
+          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+          isUser ? "bg-[#2563EB]" : "bg-[#2563EB]"
         )}
       >
         {isUser ? (
-          <User className="h-4 w-4 text-white" />
+          <User className="h-3.5 w-3.5 text-white" />
         ) : (
-          <Bot className="h-4 w-4 text-slate-600" />
+          <Bot className="h-3.5 w-3.5 text-white" />
         )}
       </div>
 
-      <div className={cn("flex max-w-[75%] flex-col gap-1", isUser && "items-end")}>
+      <div className={cn("flex max-w-[78%] flex-col gap-1.5", isUser && "items-end")}>
         {/* Bubble */}
         <div
           className={cn(
-            "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
+            "rounded-2xl px-4 py-3 text-sm leading-relaxed",
             isUser
-              ? "rounded-tr-sm bg-brand-600 text-white"
-              : "rounded-tl-sm bg-slate-100 text-slate-800"
+              ? "rounded-tr-sm bg-[#2563EB] text-white shadow-sm shadow-blue-200"
+              : "rounded-tl-sm border border-[#E2E8F0] bg-white text-slate-800 shadow-sm"
           )}
         >
-          {/* Preserve line breaks and markdown-style bold */}
           {message.content.split("\n").map((line, i) => (
-            <p key={i} className={i > 0 ? "mt-1" : ""}>
+            <p key={i} className={i > 0 ? "mt-1.5" : ""}>
               {renderLine(line)}
             </p>
           ))}
         </div>
 
-        {/* Citations */}
-        {message.citations && message.citations.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {message.citations.map((c) => (
-              <span
-                key={c.index}
-                title={c.source}
-                className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700"
-              >
-                [{c.index}] {c.agreement.toUpperCase()} · {c.source.split("—")[0].trim()}
+        {/* Sources collapsible — assistant only */}
+        {!isUser && message.citations && message.citations.length > 0 && (
+          <div className="w-full rounded-xl border border-[#E2E8F0] bg-white shadow-sm">
+            <button
+              onClick={() => setSourcesOpen((v) => !v)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left"
+            >
+              <BookOpen className="h-3.5 w-3.5 text-[#2563EB]" />
+              <span className="flex-1 text-xs font-medium text-slate-600">
+                Sources ({message.citations.length})
               </span>
-            ))}
+              {sourcesOpen ? (
+                <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+              )}
+            </button>
+            {sourcesOpen && (
+              <div className="border-t border-[#E2E8F0] px-3 pb-3 pt-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {message.citations.map((c) => (
+                    <span
+                      key={c.index}
+                      title={c.source}
+                      className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-[#2563EB]"
+                    >
+                      [{c.index}] {c.agreement.toUpperCase()} · {c.source.split("—")[0].trim()}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

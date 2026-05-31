@@ -5,14 +5,18 @@ export const metadata: Metadata = { title: "Certificates" };
 
 export default function CertificatesPage() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Certificates of Origin</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          All generated certificates — download, view, or reissue.
-        </p>
+    <div className="min-h-screen bg-[#F8FAFF] px-0 py-0">
+      <div className="space-y-6 p-6">
+        <div className="flex items-end justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Certificates</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              All generated certificates of origin — download, view, or reissue.
+            </p>
+          </div>
+        </div>
+        <CertificatesPanel />
       </div>
-      <CertificatesPanel />
     </div>
   );
 }

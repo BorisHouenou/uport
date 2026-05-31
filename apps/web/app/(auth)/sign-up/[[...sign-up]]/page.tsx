@@ -1,21 +1,66 @@
 import { SignUp } from "@clerk/nextjs";
+import { ShieldCheck, CheckCircle2 } from "lucide-react";
 
 export default function SignUpPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-950 to-brand-800">
-      <div className="w-full max-w-md space-y-8 px-4">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-white tracking-tight">Uportai</h1>
-          <p className="mt-2 text-brand-200 text-sm">Start your free trial — no credit card required</p>
+    <div className="flex min-h-screen">
+      {/* Left — brand panel */}
+      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-[#0F1E3C] px-12 py-10">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] shadow-lg">
+            <ShieldCheck className="h-5 w-5 text-white" />
+          </div>
+          <span className="text-lg font-bold text-white tracking-tight">Uportai</span>
         </div>
-        <SignUp
-          appearance={{
-            elements: {
-              rootBox: "w-full",
-              card: "rounded-xl shadow-2xl",
-            },
-          }}
-        />
+
+        <div>
+          <div className="mb-4 inline-flex rounded-full border border-[#2563EB]/30 bg-[#2563EB]/10 px-3 py-1 text-xs font-medium text-[#60A5FA]">
+            Early Access — First 50 Partners
+          </div>
+          <h2 className="text-4xl font-bold text-white leading-tight tracking-tight">
+            Join the founding<br />cohort.
+          </h2>
+          <p className="mt-4 text-[#94a3b8] text-base leading-relaxed max-w-sm">
+            Design partners get 6 months free, hands-on onboarding, and direct influence over the Uportai roadmap.
+          </p>
+          <ul className="mt-8 space-y-3">
+            {[
+              "6 months complimentary access",
+              "Dedicated onboarding and support",
+              "Shape the product roadmap directly",
+            ].map((item) => (
+              <li key={item} className="flex items-start gap-3 text-sm text-[#94a3b8]">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#3B82F6]" />
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <p className="text-xs text-[#4a6fa5]">© 2025 Uportai · SOC 2 · PIPEDA · GDPR</p>
+      </div>
+
+      {/* Right — Clerk form */}
+      <div className="flex flex-1 items-center justify-center bg-[#F8FAFF] px-6 py-12">
+        <div className="w-full max-w-sm">
+          <div className="mb-6 lg:hidden flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#2563EB] to-[#1D4ED8]">
+              <ShieldCheck className="h-4 w-4 text-white" />
+            </div>
+            <span className="text-base font-bold text-[#0A0F1E]">Uportai</span>
+          </div>
+          <SignUp
+            appearance={{
+              elements: {
+                rootBox: "w-full",
+                card: "rounded-2xl shadow-card border border-[#E2E8F0] bg-white",
+                headerTitle: "text-[#0A0F1E] font-bold",
+                formButtonPrimary: "bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl font-semibold",
+                footerActionLink: "text-[#2563EB] hover:text-[#1D4ED8]",
+              },
+            }}
+          />
+        </div>
       </div>
     </div>
   );
