@@ -1,56 +1,42 @@
 """
-Origin Determination Agent — LangGraph workflow.
+Origin Determination Agent — agentic tool-calling loop.
 
-Graph nodes:
-  fetch_agreements → fetch_rules → calculate_rvc → check_tariff_shift
-      → check_wholly_obtained → arbitrage → draft_reasoning → END
+Architecture
+------------
+Claude (claude-sonnet-4-6) drives the workflow via tool use, calling:
+  1. get_applicable_agreements  — which FTAs apply to this country pair?
+  2. get_roo_rules              — what rule governs this HS code under each FTA?
+  3. run_roo_engine             — execute the deterministic RVC/TS/WO calculations
+  4. get_tariff_rates           — what tariff savings does preferential origin unlock?
 
-The agent uses Claude claude-sonnet-4-6 with tool use to:
-  1. Identify applicable trade agreements for the shipment
-  2. Retrieve RoO rules per agreement per HS code
-  3. Run the deterministic RoO engine for calculations
-  4. Synthesise a compliance determination with full reasoning
+The deterministic engine (packages/roo-engine) does the math; Claude handles
+ambiguity resolution, edge case reasoning, and plain-language summarisation.
 
-The deterministic engine (packages/roo-engine) does the math.
-The LLM handles ambiguity resolution, edge case reasoning, and natural
-language explanation generation.
+The loop runs up to MAX_TOOL_ROUNDS iterations, mirroring the hs_classifier pattern.
+Claude decides when it has enough information to produce the final JSON determination.
 """
 from __future__ import annotations
 
 import json
 import os
 import sys
-from typing import Any, TypedDict
+from typing import Any
 
 import anthropic
 from pydantic import BaseModel, Field
 
-# Add roo-engine to path
+# Add roo-engine to path so engine models are importable directly
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "roo-engine"))
 
-from engine import RooEngine
-from models import (
-    AgreementDetermination,
-    BOMLine,
-    DeterminationResult,
-    EngineOutput,
-    ProductInfo,
-    RooRule,
-    RuleType,
-)
-from tools import (
-    CLAUDE_TOOLS,
-    dispatch_tool,
-    get_applicable_agreements,
-    get_roo_rules,
-)
+from tools import CLAUDE_TOOLS, dispatch_tool
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
-roo_engine = RooEngine()
+MAX_TOOL_ROUNDS = 10
+MAX_TOKENS = 2048
 
 
-# ─── Agent state ──────────────────────────────────────────────────────────────
+# ─── Input / output models ─────────────────────────────────────────────────────
 
 class ShipmentInput(BaseModel):
     """Input to the origin determination workflow."""
@@ -72,76 +58,186 @@ class OriginDeterminationOutput(BaseModel):
     production_country: str
     destination_country: str
     agreements_evaluated: list[str]
-    determinations: list[dict]  # AgreementDetermination serialised
+    determinations: list[dict]
     best_agreement: str | None
     best_saving_usd: float | None
     needs_human_review: bool
     review_reasons: list[str]
     llm_summary: str
     confidence_overall: float
+    recommended_action: str  # PROCEED | NEEDS_REVIEW | DOES_NOT_QUALIFY
+    tool_calls_made: int = 0
 
 
-# ─── Main workflow ─────────────────────────────────────────────────────────────
+# ─── Prompts ───────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are a trade compliance specialist with deep expertise in Rules of Origin under CUSMA/USMCA, CETA, CPTPP, AfCFTA, and other major FTAs.
 
-You have access to tools to:
-1. Look up applicable trade agreements for a country pair
-2. Retrieve specific Rules of Origin for an HS code under each agreement
-3. The deterministic RoO engine has already calculated the RVC and Tariff Shift results
+You have access to tools to analyse shipments:
+- get_applicable_agreements: find which FTAs cover this country pair
+- get_roo_rules: retrieve the PSR (Product-Specific Rule) for the HS code under each FTA
+- run_roo_engine: execute the deterministic RVC / Tariff Shift / Wholly Obtained calculations
+- get_tariff_rates: look up the MFN tariff rate and potential preferential rate savings
 
-Your role:
-- Review the engine results and the underlying rules
-- Identify any edge cases, exceptions, or ambiguities the deterministic engine may have missed
-- Assess confidence in the determination
-- Write a clear, actionable compliance summary for the exporter
+Workflow:
+1. Call get_applicable_agreements to discover relevant FTAs
+2. Call get_roo_rules for each FTA to understand what rule governs this product
+3. Call run_roo_engine to get the deterministic calculation results
+4. Optionally call get_tariff_rates to quantify savings
+5. Synthesise everything into a structured JSON determination
 
-When uncertain: flag for human review rather than guessing. Accuracy is paramount.
-Return ONLY a JSON object with no markdown fences."""
+Important principles:
+- Run the engine (run_roo_engine) before writing your final determination — never guess at RVC numbers
+- If get_roo_rules returns no rules, flag for human review; do not fabricate a rule
+- When BOM lines have unknown origin (is_originating: null), note this reduces confidence
+- AfCFTA uses Build-Up (value added content) ≥35%; CUSMA/CETA/CPTPP use Build-Down or Net Cost
+- Confidence should reflect: how specific the rule match was, how complete the BOM data is, and whether the engine produced a clear pass or fail
 
-DETERMINATION_PROMPT = """
-Product: {description} (HS {hs_code})
-Production country: {production_country} → Destination: {destination_country}
-Transaction value: USD {transaction_value_usd:,.2f}
-
-Engine determination results:
-{engine_results}
-
-BOM summary ({bom_count} line items):
-{bom_summary}
-
-Based on the above, provide your compliance assessment as JSON:
-{{
-  "llm_summary": "2-3 sentence plain-English summary for the exporter",
+When you have a complete determination, return ONLY a JSON object (no markdown fences):
+{
+  "agreements_evaluated": ["cusma", "ceta"],
+  "determinations": [...engine output determinations...],
+  "best_agreement": "cusma" or null,
+  "best_saving_usd": 1234.56 or null,
+  "needs_human_review": true/false,
+  "review_reasons": ["reason if any"],
+  "llm_summary": "2-3 sentence plain-English explanation for the exporter",
   "confidence_overall": 0.0-1.0,
-  "review_flags": ["any issues requiring human review"],
-  "best_agreement": "agreement code or null",
-  "recommended_action": "PROCEED | NEEDS_REVIEW | DOES_NOT_QUALIFY"
-}}
-"""
+  "recommended_action": "PROCEED" | "NEEDS_REVIEW" | "DOES_NOT_QUALIFY"
+}"""
 
 
-def run_origin_determination(shipment: ShipmentInput, shipment_id: str | None = None) -> OriginDeterminationOutput:
+def _make_user_message(shipment: ShipmentInput) -> str:
+    bom_lines = shipment.bom[:10]
+    bom_text = "\n".join(
+        f"  - {b.get('description', '?')} | HS {b.get('hs_code', '?')} | "
+        f"{b.get('origin_country', '?')} | USD {b.get('unit_cost', 0):.2f} × {b.get('quantity', 1)} | "
+        f"originating: {b.get('is_originating', 'unknown')}"
+        for b in bom_lines
+    )
+    if len(shipment.bom) > 10:
+        bom_text += f"\n  ... and {len(shipment.bom) - 10} more items"
+
+    return f"""Determine Rules of Origin compliance for this shipment:
+
+Product: {shipment.product_description} (HS {shipment.hs_code})
+Production country: {shipment.production_country}
+Destination: {shipment.destination_country}
+Transaction value: USD {shipment.transaction_value_usd:,.2f}
+Net cost: {f'USD {shipment.net_cost_usd:,.2f}' if shipment.net_cost_usd else 'not provided'}
+Wholly obtained category: {shipment.wholly_obtained_category or 'N/A'}
+FTAs to evaluate: {', '.join(shipment.agreement_codes) if shipment.agreement_codes else 'auto-detect'}
+
+BOM ({len(shipment.bom)} items):
+{bom_text or '  (no BOM provided)'}
+
+Use the available tools to run the complete origin determination and return the structured JSON result."""
+
+
+# ─── Main agentic loop ─────────────────────────────────────────────────────────
+
+def run_origin_determination(
+    shipment: ShipmentInput,
+    shipment_id: str | None = None,
+) -> OriginDeterminationOutput:
     """
-    Full origin determination workflow.
+    Run the full origin determination via agentic tool loop.
 
-    Args:
-        shipment: shipment data including HS code, BOM, transaction value
-        shipment_id: optional DB ID for tracing
-
-    Returns:
-        OriginDeterminationOutput with determinations per agreement
+    Claude calls tools iteratively until it has enough information to produce
+    a complete structured determination. The loop mirrors hs_classifier.py.
     """
-    # 1. Resolve applicable agreements
-    if shipment.agreement_codes:
-        agreements = [{"code": c} for c in shipment.agreement_codes]
-    else:
-        agreements = get_applicable_agreements(
-            origin_country=shipment.production_country,
-            destination_country=shipment.destination_country,
+    messages: list[dict] = [{"role": "user", "content": _make_user_message(shipment)}]
+    tool_calls_made = 0
+
+    for _ in range(MAX_TOOL_ROUNDS):
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            tools=CLAUDE_TOOLS,
+            messages=messages,
         )
 
-    if not agreements:
+        messages.append({"role": "assistant", "content": response.content})
+
+        if response.stop_reason == "end_turn":
+            for block in response.content:
+                if hasattr(block, "text") and block.text.strip():
+                    return _parse_result(block.text, shipment, shipment_id, tool_calls_made)
+            break
+
+        if response.stop_reason == "tool_use":
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    tool_calls_made += 1
+                    try:
+                        result = dispatch_tool(block.name, block.input)
+                    except Exception as exc:
+                        result = {"error": str(exc)}
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(result, default=str),
+                    })
+            messages.append({"role": "user", "content": tool_results})
+        else:
+            break
+
+    # Fallback: no clean JSON from Claude — return needs_review
+    return OriginDeterminationOutput(
+        shipment_id=shipment_id,
+        hs_code=shipment.hs_code,
+        production_country=shipment.production_country,
+        destination_country=shipment.destination_country,
+        agreements_evaluated=shipment.agreement_codes or [],
+        determinations=[],
+        best_agreement=None,
+        best_saving_usd=None,
+        needs_human_review=True,
+        review_reasons=["Agent did not produce a structured determination within allowed rounds"],
+        llm_summary="Automated determination incomplete — manual review required.",
+        confidence_overall=0.0,
+        recommended_action="NEEDS_REVIEW",
+        tool_calls_made=tool_calls_made,
+    )
+
+
+def _parse_result(
+    text: str,
+    shipment: ShipmentInput,
+    shipment_id: str | None,
+    tool_calls_made: int,
+) -> OriginDeterminationOutput:
+    """Parse Claude's final JSON output into OriginDeterminationOutput."""
+    text = text.strip()
+    # Strip markdown fences
+    if text.startswith("```"):
+        parts = text.split("```")
+        text = parts[1] if len(parts) > 1 else text
+        if text.startswith("json"):
+            text = text[4:]
+    text = text.strip()
+
+    try:
+        data = json.loads(text)
+        return OriginDeterminationOutput(
+            shipment_id=shipment_id,
+            hs_code=shipment.hs_code,
+            production_country=shipment.production_country,
+            destination_country=shipment.destination_country,
+            agreements_evaluated=data.get("agreements_evaluated", []),
+            determinations=data.get("determinations", []),
+            best_agreement=data.get("best_agreement"),
+            best_saving_usd=data.get("best_saving_usd"),
+            needs_human_review=bool(data.get("needs_human_review", False)),
+            review_reasons=data.get("review_reasons", []),
+            llm_summary=data.get("llm_summary", ""),
+            confidence_overall=float(data.get("confidence_overall", 0.0)),
+            recommended_action=data.get("recommended_action", "NEEDS_REVIEW"),
+            tool_calls_made=tool_calls_made,
+        )
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
         return OriginDeterminationOutput(
             shipment_id=shipment_id,
             hs_code=shipment.hs_code,
@@ -152,143 +248,9 @@ def run_origin_determination(shipment: ShipmentInput, shipment_id: str | None = 
             best_agreement=None,
             best_saving_usd=None,
             needs_human_review=True,
-            review_reasons=[f"No FTA found for {shipment.production_country} → {shipment.destination_country}"],
-            llm_summary=f"No applicable free trade agreement found for this country pair. Goods will be subject to MFN tariff rates.",
-            confidence_overall=1.0,
-        )
-
-    # 2. Fetch RoO rules and build engine input
-    rules_by_agreement: dict[str, list[RooRule]] = {}
-    for agreement in agreements:
-        code = agreement["code"]
-        raw_rules = get_roo_rules(shipment.hs_code, code)
-        if raw_rules:
-            rules_by_agreement[code] = [_dict_to_rule(r, code) for r in raw_rules]
-
-    if not rules_by_agreement:
-        return OriginDeterminationOutput(
-            shipment_id=shipment_id,
-            hs_code=shipment.hs_code,
-            production_country=shipment.production_country,
-            destination_country=shipment.destination_country,
-            agreements_evaluated=[a["code"] for a in agreements],
-            determinations=[],
-            best_agreement=None,
-            best_saving_usd=None,
-            needs_human_review=True,
-            review_reasons=[f"No RoO rules found for HS {shipment.hs_code} under available agreements"],
-            llm_summary="No Rules of Origin found for this HS code. Manual verification required.",
+            review_reasons=[f"Failed to parse agent output: {exc}"],
+            llm_summary="Parse error in agent output — manual review required.",
             confidence_overall=0.0,
+            recommended_action="NEEDS_REVIEW",
+            tool_calls_made=tool_calls_made,
         )
-
-    # 3. Build ProductInfo and run deterministic engine
-    bom_lines = [_dict_to_bom_line(b) for b in shipment.bom]
-    product = ProductInfo(
-        hs_code=shipment.hs_code,
-        description=shipment.product_description,
-        transaction_value_usd=shipment.transaction_value_usd,
-        net_cost_usd=shipment.net_cost_usd,
-        bom=bom_lines,
-        production_country=shipment.production_country,
-        wholly_obtained_category=shipment.wholly_obtained_category,
-    )
-    engine_output: EngineOutput = roo_engine.evaluate(product, rules_by_agreement)
-
-    # 4. Ask Claude to review, flag edge cases, and write the summary
-    llm_assessment = _get_llm_assessment(shipment, engine_output)
-
-    return OriginDeterminationOutput(
-        shipment_id=shipment_id,
-        hs_code=shipment.hs_code,
-        production_country=shipment.production_country,
-        destination_country=shipment.destination_country,
-        agreements_evaluated=engine_output.agreements_evaluated,
-        determinations=[d.model_dump() for d in engine_output.determinations],
-        best_agreement=llm_assessment.get("best_agreement") or engine_output.best_agreement,
-        best_saving_usd=engine_output.best_saving_usd,
-        needs_human_review=engine_output.needs_human_review or bool(llm_assessment.get("review_flags")),
-        review_reasons=engine_output.review_reasons + llm_assessment.get("review_flags", []),
-        llm_summary=llm_assessment.get("llm_summary", ""),
-        confidence_overall=llm_assessment.get("confidence_overall", 0.0),
-    )
-
-
-def _get_llm_assessment(shipment: ShipmentInput, engine_output: EngineOutput) -> dict:
-    """Ask Claude to review engine results and produce the plain-English summary."""
-    engine_results_text = "\n".join(
-        f"  [{d.agreement_code}] {d.result.value.upper()} "
-        f"(confidence: {d.confidence:.0%}) — {d.rule_applied.value}: {d.reasoning[:120]}..."
-        for d in engine_output.determinations
-    )
-
-    bom_summary = _summarise_bom(shipment.bom)
-
-    prompt = DETERMINATION_PROMPT.format(
-        description=shipment.product_description,
-        hs_code=shipment.hs_code,
-        production_country=shipment.production_country,
-        destination_country=shipment.destination_country,
-        transaction_value_usd=shipment.transaction_value_usd,
-        engine_results=engine_results_text or "  No results — insufficient data",
-        bom_count=len(shipment.bom),
-        bom_summary=bom_summary,
-    )
-
-    try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=512,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = response.content[0].text.strip()
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        return json.loads(text.strip())
-    except Exception as e:
-        return {
-            "llm_summary": "Automated summary unavailable — see determination details.",
-            "confidence_overall": 0.5,
-            "review_flags": [f"LLM assessment error: {e}"],
-            "best_agreement": engine_output.best_agreement,
-            "recommended_action": "NEEDS_REVIEW",
-        }
-
-
-def _summarise_bom(bom: list[dict]) -> str:
-    if not bom:
-        return "  No BOM provided"
-    lines = []
-    for item in bom[:5]:  # show first 5
-        status = "✓ originating" if item.get("is_originating") else ("✗ non-originating" if item.get("is_originating") is False else "? unknown origin")
-        lines.append(f"  - {item.get('description','?')} (HS {item.get('hs_code','?')}, {item.get('origin_country','?')}, USD {item.get('unit_cost',0):.2f}) [{status}]")
-    if len(bom) > 5:
-        lines.append(f"  ... and {len(bom)-5} more items")
-    return "\n".join(lines)
-
-
-def _dict_to_rule(d: dict, agreement_code: str) -> RooRule:
-    return RooRule(
-        agreement_code=agreement_code,
-        hs_heading=None,
-        rule_type=RuleType(d["rule_type"]),
-        rule_text=d.get("rule_text", ""),
-        value_threshold=d.get("value_threshold"),
-        rvc_method=d.get("rvc_method"),
-        ts_heading_level=d.get("ts_heading_level"),
-    )
-
-
-def _dict_to_bom_line(d: dict) -> BOMLine:
-    return BOMLine(
-        description=d.get("description", ""),
-        hs_code=d.get("hs_code"),
-        origin_country=d.get("origin_country", "XX"),
-        quantity=float(d.get("quantity", 1)),
-        unit_cost=float(d.get("unit_cost", 0)),
-        currency=d.get("currency", "USD"),
-        unit_cost_usd=d.get("unit_cost_usd"),
-        is_originating=d.get("is_originating"),
-    )

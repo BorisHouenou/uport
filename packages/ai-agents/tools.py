@@ -461,6 +461,213 @@ def get_roo_rules(hs_code: str, agreement_code: str) -> list[dict]:
     return []
 
 
+def run_roo_engine(
+    hs_code: str,
+    origin_country: str,
+    destination_country: str,
+    transaction_value_usd: float,
+    bom_items: list[dict],
+    agreement_codes: list[str] | None = None,
+    net_cost_usd: float | None = None,
+    product_description: str = "",
+    wholly_obtained_category: str | None = None,
+) -> dict:
+    """
+    Execute the deterministic RoO engine for a product shipment.
+
+    Runs RVC, Tariff Shift, and Wholly Obtained checks against all applicable
+    agreements and returns structured determination results with calibrated
+    confidence scores.
+
+    Args:
+        hs_code: 4–6 digit HS code for the finished good
+        origin_country: ISO-3166 alpha-2 production country
+        destination_country: ISO-3166 alpha-2 destination country
+        transaction_value_usd: ex-works / FOB price in USD
+        bom_items: list of BOM components with {description, hs_code, origin_country, unit_cost, quantity, is_originating}
+        agreement_codes: specific FTAs to evaluate; None = auto-detect from country pair
+        net_cost_usd: net cost (required for Net Cost RVC method)
+        product_description: plain text description
+        wholly_obtained_category: "mineral" | "plant" | "fish" | etc.
+
+    Returns:
+        {agreements_evaluated, determinations, best_agreement, best_saving_usd,
+         needs_human_review, review_reasons, confidence_summary}
+    """
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "roo-engine"))
+
+    try:
+        from engine import RooEngine
+        from models import BOMLine, ProductInfo, RooRule, RuleType
+
+        # Resolve agreements
+        if agreement_codes:
+            agreements = [{"code": c} for c in agreement_codes]
+        else:
+            agreements = get_applicable_agreements(origin_country, destination_country)
+
+        if not agreements:
+            return {
+                "agreements_evaluated": [],
+                "determinations": [],
+                "best_agreement": None,
+                "best_saving_usd": None,
+                "needs_human_review": True,
+                "review_reasons": [f"No FTA found for {origin_country} → {destination_country}"],
+                "error": None,
+            }
+
+        # Build RooRule lists per agreement
+        rules_by_agreement: dict[str, list] = {}
+        for ag in agreements:
+            code = ag["code"]
+            raw = get_roo_rules(hs_code, code)
+            if raw:
+                rules_list = []
+                for r in raw:
+                    try:
+                        rule = RooRule(
+                            agreement_code=code,
+                            hs_chapter=None,
+                            hs_heading=None,
+                            hs_subheading=None,
+                            rule_type=RuleType(r["rule_type"]),
+                            rule_text=r.get("rule_text", ""),
+                            value_threshold=r.get("value_threshold"),
+                            rvc_method=r.get("rvc_method"),
+                            ts_heading_level=r.get("ts_heading_level"),
+                            ts_exceptions=r.get("ts_exceptions") or [],
+                        )
+                        rules_list.append(rule)
+                    except ValueError:
+                        continue
+                if rules_list:
+                    rules_by_agreement[code] = rules_list
+
+        if not rules_by_agreement:
+            return {
+                "agreements_evaluated": [ag["code"] for ag in agreements],
+                "determinations": [],
+                "best_agreement": None,
+                "best_saving_usd": None,
+                "needs_human_review": True,
+                "review_reasons": [f"No RoO rules found for HS {hs_code}"],
+                "error": None,
+            }
+
+        # Build product model
+        bom_lines = []
+        for b in bom_items:
+            bom_lines.append(BOMLine(
+                description=b.get("description", ""),
+                hs_code=b.get("hs_code"),
+                origin_country=b.get("origin_country", "XX"),
+                quantity=float(b.get("quantity", 1)),
+                unit_cost=float(b.get("unit_cost", 0)),
+                currency=b.get("currency", "USD"),
+                unit_cost_usd=b.get("unit_cost_usd"),
+                is_originating=b.get("is_originating"),
+            ))
+
+        product = ProductInfo(
+            hs_code=hs_code,
+            description=product_description,
+            transaction_value_usd=transaction_value_usd,
+            net_cost_usd=net_cost_usd,
+            bom=bom_lines,
+            production_country=origin_country,
+            wholly_obtained_category=wholly_obtained_category,
+        )
+
+        engine = RooEngine()
+        output = engine.evaluate(product, rules_by_agreement)
+
+        return {
+            "agreements_evaluated": output.agreements_evaluated,
+            "determinations": [d.model_dump() for d in output.determinations],
+            "best_agreement": output.best_agreement,
+            "best_saving_usd": output.best_saving_usd,
+            "needs_human_review": output.needs_human_review,
+            "review_reasons": output.review_reasons,
+            "error": None,
+        }
+
+    except Exception as exc:
+        return {
+            "agreements_evaluated": agreement_codes or [],
+            "determinations": [],
+            "best_agreement": None,
+            "best_saving_usd": None,
+            "needs_human_review": True,
+            "review_reasons": [f"Engine error: {exc}"],
+            "error": str(exc),
+        }
+
+
+def get_tariff_rates(hs_code: str, importing_country: str, agreement_code: str | None = None) -> dict:
+    """
+    Look up MFN and preferential tariff rates for an HS heading.
+
+    Queries the tariff_rates table in production; returns placeholder structure
+    in dev (the rates data pipeline is a separate feed).
+
+    Args:
+        hs_code: 4-digit HS heading
+        importing_country: ISO-3166 alpha-2 country applying the tariff
+        agreement_code: FTA code for preferential rate lookup (optional)
+
+    Returns:
+        {hs_heading, importing_country, mfn_rate, preferential_rate, agreement_code, source}
+    """
+    cleaned = re.sub(r"[.\s]", "", hs_code)[:4]
+
+    conn = _get_sync_conn()
+    if conn:
+        try:
+            from sqlalchemy import text
+            row = conn.execute(
+                text("""
+                    SELECT hs_heading, importing_country, agreement_code,
+                           rate_pct, rate_description, source
+                    FROM tariff_rates
+                    WHERE hs_heading = :h
+                      AND importing_country = :country
+                      AND (:code IS NULL OR agreement_code = :code)
+                    ORDER BY CASE WHEN agreement_code IS NULL THEN 1 ELSE 0 END, rate_pct ASC
+                    LIMIT 5
+                """),
+                {"h": cleaned, "country": importing_country.upper(), "code": agreement_code},
+            ).fetchall()
+
+            if row:
+                mfn = next((r for r in row if r[2] is None), None)
+                pref = next((r for r in row if r[2] == agreement_code), None) if agreement_code else None
+                return {
+                    "hs_heading": cleaned,
+                    "importing_country": importing_country.upper(),
+                    "mfn_rate": f"{mfn[3]:.1f}%" if mfn else "unknown",
+                    "preferential_rate": f"{pref[3]:.1f}%" if pref else ("0%" if agreement_code else None),
+                    "agreement_code": agreement_code,
+                    "source": "tariff_rates table",
+                }
+        except Exception:
+            pass
+        finally:
+            conn.close()
+
+    # No rates DB yet — return structural placeholder so Claude can reason
+    return {
+        "hs_heading": cleaned,
+        "importing_country": importing_country.upper(),
+        "mfn_rate": "unavailable — tariff rates feed not yet loaded",
+        "preferential_rate": "0% if agreement qualifies" if agreement_code else None,
+        "agreement_code": agreement_code,
+        "source": "placeholder — run tariff rates loader to populate",
+    }
+
+
 # ─── Claude tool schemas ──────────────────────────────────────────────────────
 
 CLAUDE_TOOLS = [
@@ -530,16 +737,102 @@ CLAUDE_TOOLS = [
             "required": ["hs_code", "agreement_code"],
         },
     },
+    {
+        "name": "run_roo_engine",
+        "description": (
+            "Execute the deterministic Rules of Origin compliance engine. "
+            "Runs RVC (Build-Down, Build-Up, Net Cost), Tariff Shift, and Wholly Obtained "
+            "checks against one or more trade agreements. Returns pass/fail per agreement "
+            "with calibrated confidence scores and full calculation detail. "
+            "Call this after you have retrieved the applicable agreements and rules."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "hs_code": {
+                    "type": "string",
+                    "description": "4–6 digit HS code of the finished good",
+                },
+                "origin_country": {
+                    "type": "string",
+                    "description": "ISO-3166 alpha-2 production country (e.g. CA, NG, MX)",
+                },
+                "destination_country": {
+                    "type": "string",
+                    "description": "ISO-3166 alpha-2 destination country",
+                },
+                "transaction_value_usd": {
+                    "type": "number",
+                    "description": "Ex-works or FOB price in USD",
+                },
+                "bom_items": {
+                    "type": "array",
+                    "description": "Bill of Materials components",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "description": {"type": "string"},
+                            "hs_code": {"type": "string"},
+                            "origin_country": {"type": "string"},
+                            "unit_cost": {"type": "number"},
+                            "quantity": {"type": "number"},
+                            "is_originating": {"type": "boolean"},
+                        },
+                        "required": ["description", "origin_country", "unit_cost"],
+                    },
+                },
+                "agreement_codes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "FTA codes to evaluate. Empty/null = auto-detect from country pair.",
+                },
+                "net_cost_usd": {
+                    "type": "number",
+                    "description": "Net cost in USD (required for Net Cost RVC method)",
+                },
+                "product_description": {"type": "string"},
+                "wholly_obtained_category": {
+                    "type": "string",
+                    "description": "Category if product may qualify as wholly obtained: mineral, plant, fish, livestock, etc.",
+                },
+            },
+            "required": ["hs_code", "origin_country", "destination_country", "transaction_value_usd", "bom_items"],
+        },
+    },
+    {
+        "name": "get_tariff_rates",
+        "description": "Look up MFN (Most-Favoured-Nation) and preferential tariff rates for an HS heading in an importing country. Use to calculate potential savings from preferential origin.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "hs_code": {
+                    "type": "string",
+                    "description": "4-digit HS heading",
+                },
+                "importing_country": {
+                    "type": "string",
+                    "description": "ISO-3166 alpha-2 importing country",
+                },
+                "agreement_code": {
+                    "type": "string",
+                    "description": "FTA code for preferential rate lookup (optional)",
+                },
+            },
+            "required": ["hs_code", "importing_country"],
+        },
+    },
 ]
 
 
 def dispatch_tool(name: str, inputs: dict) -> Any:
     """Dispatch a tool call by name."""
-    dispatch = {
+    dispatch: dict[str, Any] = {
         "search_tariff_schedule": search_tariff_schedule,
         "validate_hs_code": validate_hs_code,
         "get_applicable_agreements": get_applicable_agreements,
         "get_roo_rules": get_roo_rules,
+        "run_roo_engine": run_roo_engine,
+        "get_tariff_rates": get_tariff_rates,
     }
     if name not in dispatch:
         raise ValueError(f"Unknown tool: {name}")

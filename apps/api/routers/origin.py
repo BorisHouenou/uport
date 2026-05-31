@@ -77,54 +77,100 @@ async def determine_origin(
         b = await db.execute(select(BOMItem).where(BOMItem.product_id == product.id))
         bom_rows = b.scalars().all()
 
-    agreement_codes = payload.agreement_codes or ["cusma"]
+    # ── Run the real origin determination engine ──────────────────────────────
+    import sys as _sys
+    import os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "..", "packages", "ai-agents"))
+
+    from origin_agent import ShipmentInput, run_origin_determination
+
+    bom_dicts = [
+        {
+            "description": b.description,
+            "hs_code": b.hs_code,
+            "origin_country": b.origin_country,
+            "unit_cost": float(b.unit_cost),
+            "quantity": float(b.quantity),
+            "currency": b.currency,
+            "is_originating": b.is_originating,
+        }
+        for b in bom_rows
+    ]
+
+    ship_input = ShipmentInput(
+        hs_code=product.hs_code if product else "0000",
+        product_description=product.name if product else "Unknown product",
+        production_country=shipment.origin_country,
+        destination_country=shipment.destination_country,
+        transaction_value_usd=float(shipment.shipment_value_usd or 0),
+        bom=bom_dicts,
+        agreement_codes=payload.agreement_codes or [],
+    )
+
+    engine_result = run_origin_determination(ship_input)
+
     _AGREEMENT_NAMES = {
         "cusma": "Canada-United States-Mexico Agreement",
         "ceta": "Canada-European Union Comprehensive Economic and Trade Agreement",
         "cptpp": "Comprehensive and Progressive Agreement for Trans-Pacific Partnership",
+        "afcfta": "African Continental Free Trade Area",
         "ckfta": "Canada-Korea Free Trade Agreement",
+        "ccofta": "Canada-Colombia Free Trade Agreement",
+        "cpafta": "Canada-Panama Free Trade Agreement",
+        "cifta": "Canada-Israel Free Trade Agreement",
+        "cufta": "Canada-Ukraine Free Trade Agreement",
+        "cjfta": "Canada-Jordan Free Trade Agreement",
     }
 
     determinations = []
-    for code in agreement_codes:
-        total_cost = sum(float(b.unit_cost) * float(b.quantity) for b in bom_rows) or 1.0
-        ca_cost = sum(
-            float(b.unit_cost) * float(b.quantity)
-            for b in bom_rows if b.origin_country == "CA"
+    for det_dict in engine_result.determinations:
+        code = det_dict.get("agreement_code", "")
+        passing = det_dict.get("result") == "pass"
+        saving = det_dict.get("savings_per_unit") or (
+            float(shipment.shipment_value_usd or 0) * 0.065 if passing else 0
         )
-        rvc = (ca_cost / total_cost) * 100 if total_cost else 0
-        passes = rvc >= 35  # simplified RVC threshold
-
         det = OriginDetermination(
             id=uuid.uuid4(),
             shipment_id=shipment_id,
             agreement_code=code,
             agreement_name=_AGREEMENT_NAMES.get(code, code.upper()),
-            rule_applied="rvc_build_down",
-            rule_text=f"Regional Value Content (Build-Down) ≥ 35% — calculated RVC: {rvc:.1f}%",
-            result="pass" if passes else "fail",
-            confidence=0.88 if passes else 0.72,
-            reasoning=(
-                f"Product: {product.name if product else 'Unknown'} (HS {product.hs_code if product else 'N/A'}). "
-                f"Origin: {shipment.origin_country} → Destination: {shipment.destination_country}. "
-                f"BOM analysis: {len(bom_rows)} components, CA-originating cost ${ca_cost:.2f} of ${total_cost:.2f} total "
-                f"= {rvc:.1f}% RVC. {'Qualifies' if passes else 'Does not qualify'} under {code.upper()}."
-            ),
-            preferential_rate="0%" if passes else None,
-            mfn_rate="6.5%",
-            savings_per_unit=float(shipment.shipment_value_usd or 0) * 0.065 if passes else 0,
-            status="completed",
+            rule_applied=det_dict.get("rule_applied", "unknown"),
+            rule_text=det_dict.get("rule_text", ""),
+            result=det_dict.get("result", "fail"),
+            confidence=float(det_dict.get("confidence", 0.0)),
+            reasoning=det_dict.get("reasoning", ""),
+            preferential_rate="0%" if passing else None,
+            mfn_rate=None,
+            savings_per_unit=saving,
+            status="completed" if not engine_result.needs_human_review else "needs_review",
         )
         db.add(det)
         determinations.append(det)
 
+    # If engine returned no determinations (no FTA / no rules), persist a stub
+    if not determinations:
+        stub = OriginDetermination(
+            id=uuid.uuid4(),
+            shipment_id=shipment_id,
+            agreement_code="none",
+            agreement_name="No applicable agreement",
+            rule_applied="none",
+            rule_text="; ".join(engine_result.review_reasons),
+            result="fail",
+            confidence=0.0,
+            reasoning=engine_result.llm_summary or "No applicable FTA found.",
+            status="needs_review",
+        )
+        db.add(stub)
+        determinations.append(stub)
+
     await db.commit()
 
     best = next((d for d in determinations if d.result == "pass"), None)
-    total_savings = sum(d.savings_per_unit or 0 for d in determinations if d.result == "pass")
+    total_savings = sum(float(d.savings_per_unit or 0) for d in determinations if d.result == "pass")
 
     return OriginDeterminationResponse(
-        task_id=str(determinations[0].id),  # real ID so GET /origin/{id} resolves
+        task_id=str(determinations[0].id),
         status="completed",
         shipment_id=shipment_id,
         results=[
@@ -304,6 +350,12 @@ async def submit_correction(
     if not det:
         raise HTTPException(status_code=404, detail="Determination not found")
 
+    # Pull shipment context for richer calibration data
+    ship_result = await db.execute(
+        select(Shipment).where(Shipment.id == det.shipment_id)
+    )
+    ship = ship_result.scalar_one_or_none()
+
     correction = HumanCorrection(
         org_id=org_id,
         determination_id=determination_id,
@@ -314,11 +366,78 @@ async def submit_correction(
         agreement_code=det.agreement_code,
         reviewer_id=current_user.get("user_id"),
         reviewer_notes=payload.reviewer_notes,
+        hs_chapter=payload.corrected_hs_code[:2] if payload.corrected_hs_code else None,
+        origin_country=ship.origin_country if ship else None,
+        destination_country=ship.destination_country if ship else None,
+        confidence_at_review=float(det.confidence) if det.confidence is not None else None,
     )
     db.add(correction)
     await db.commit()
     await db.refresh(correction)
     return {"correction_id": str(correction.id), "determination_id": str(determination_id)}
+
+
+@router.get("/calibration")
+async def get_calibration_stats(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return the most recent confidence calibration stats.
+
+    Shows per-agreement accuracy derived from human corrections:
+    how often the AI determination matched the expert reviewer.
+    Refreshed daily by the compute_calibration_stats Celery task.
+    """
+    from sqlalchemy import text
+    row = await db.execute(
+        text("""
+            SELECT computed_at, stats
+            FROM calibration_stats
+            ORDER BY computed_at DESC
+            LIMIT 1
+        """)
+    )
+    result = row.fetchone()
+
+    if not result:
+        # First run — compute inline from corrections
+        corr_row = await db.execute(
+            text("""
+                SELECT
+                    agreement_code,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN corrected_result IS NOT DISTINCT FROM original_result THEN 1 ELSE 0 END) AS confirmed,
+                    AVG(CASE WHEN corrected_result IS NOT DISTINCT FROM original_result THEN 1.0 ELSE 0.0 END) AS accuracy
+                FROM human_corrections
+                GROUP BY agreement_code
+            """)
+        )
+        rows = corr_row.fetchall()
+        if not rows:
+            return {
+                "computed_at": None,
+                "message": "No corrections recorded yet — accuracy calibration starts after first human reviews",
+                "agreements": {},
+                "total_corrections": 0,
+            }
+        stats = {
+            r[0] or "unknown": {
+                "total_reviews": int(r[1]),
+                "confirmed": int(r[2]),
+                "accuracy_90d": round(float(r[3] or 0), 4),
+            }
+            for r in rows
+        }
+        return {"computed_at": None, "agreements": stats, "total_corrections": sum(v["total_reviews"] for v in stats.values())}
+
+    return {
+        "computed_at": result[0].isoformat() if result[0] else None,
+        "agreements": result[1],
+        "total_corrections": sum(
+            v.get("total_reviews", 0) for v in result[1].values()
+        ) if result[1] else 0,
+    }
 
 
 def _serialize_det(d: OriginDetermination) -> dict:

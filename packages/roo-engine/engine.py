@@ -12,6 +12,12 @@ from __future__ import annotations
 
 import structlog
 
+from confidence import (
+    ConfidenceFactors,
+    HistoricalCalibrator,
+    MatchLevel,
+    compute_confidence,
+)
 from models import (
     AgreementDetermination,
     BOMLine,
@@ -118,7 +124,16 @@ class RooEngine:
             agreement_code=agreement_code,
         )
         result = DeterminationResult.PASS if wo.passes else DeterminationResult.FAIL
-        confidence = 0.95 if wo.passes else (0.5 if product.wholly_obtained_category is None else 0.9)
+        # Category unknown → chapter-level certainty at best
+        matched: MatchLevel = "heading" if product.wholly_obtained_category else "chapter"
+        confidence = compute_confidence(ConfidenceFactors(
+            matched_level=matched,
+            result_type=result.value,
+            total_bom_lines=len(product.bom),
+            unknown_origin_lines=0,
+            rule_text_present=bool(rule.rule_text),
+            historical_accuracy=HistoricalCalibrator.get_accuracy(agreement_code),
+        ))
         return AgreementDetermination(
             agreement_code=agreement_code,
             rule_applied=RuleType.WHOLLY_OBTAINED,
@@ -143,7 +158,15 @@ class RooEngine:
             rule_text=rule.rule_text,
         )
         unknown_origin = sum(1 for b in product.bom if b.is_originating is None)
-        confidence = 0.9 if ts.passes and unknown_origin == 0 else (0.65 if unknown_origin > 0 else 0.85)
+        matched = _rule_match_level(rule)
+        confidence = compute_confidence(ConfidenceFactors(
+            matched_level=matched,
+            result_type="pass" if ts.passes else "fail",
+            total_bom_lines=len(product.bom),
+            unknown_origin_lines=unknown_origin,
+            rule_text_present=bool(rule.rule_text),
+            historical_accuracy=HistoricalCalibrator.get_accuracy(agreement_code),
+        ))
 
         return AgreementDetermination(
             agreement_code=agreement_code,
@@ -176,7 +199,15 @@ class RooEngine:
             rvc = best_rvc_method(product.bom, product.transaction_value_usd, threshold, product.net_cost_usd)
 
         unknown = sum(1 for b in product.bom if b.is_originating is None)
-        confidence = 0.92 if rvc.passes and unknown == 0 else (0.6 if unknown > 2 else 0.75)
+        matched = _rule_match_level(rule)
+        confidence = compute_confidence(ConfidenceFactors(
+            matched_level=matched,
+            result_type="pass" if rvc.passes else "fail",
+            total_bom_lines=len(product.bom),
+            unknown_origin_lines=unknown,
+            rule_text_present=bool(rule.rule_text),
+            historical_accuracy=HistoricalCalibrator.get_accuracy(agreement_code),
+        ))
 
         return AgreementDetermination(
             agreement_code=agreement_code,
@@ -240,3 +271,14 @@ class RooEngine:
             RuleType.RVC_NET_COST: "net_cost",
         }
         return mapping.get(rule_type, "build_down")
+
+
+def _rule_match_level(rule: RooRule) -> MatchLevel:
+    """Determine how specifically the rule was matched (for confidence scoring)."""
+    if rule.hs_subheading:
+        return "subheading"
+    if rule.hs_heading:
+        return "heading"
+    if rule.hs_chapter:
+        return "chapter"
+    return "none"

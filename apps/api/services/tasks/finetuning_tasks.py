@@ -95,7 +95,84 @@ def _build_user_prompt(c: HumanCorrection) -> str:
         f"Original determination: {c.original_result or 'unknown'}",
         f"Original rule applied: {c.original_rule or 'unknown'}",
     ]
+    if c.origin_country and c.destination_country:
+        parts.append(f"Trade lane: {c.origin_country} → {c.destination_country}")
+    if c.hs_chapter:
+        parts.append(f"HS chapter: {c.hs_chapter}")
+    if c.rvc_pct is not None:
+        parts.append(f"RVC calculated: {c.rvc_pct:.1f}%")
+    if c.confidence_at_review is not None:
+        parts.append(f"AI confidence at review: {c.confidence_at_review:.0%}")
     if c.product_description:
         parts.append(f"Product: {c.product_description}")
-    parts.append("Based on the above, provide the correct origin determination.")
+    parts.append("Based on the above, provide the correct origin determination as JSON.")
     return "\n".join(parts)
+
+
+@celery_app.task(name="finetuning_tasks.compute_calibration_stats", bind=True, max_retries=0)
+def compute_calibration_stats(self):
+    """
+    Compute accuracy stats from human_corrections and write to DB cache.
+
+    Output persisted to a calibration_stats table for the API to expose.
+    Also reloads the HistoricalCalibrator in-process cache.
+
+    Beat schedule: daily (run after export_corrections).
+    """
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+    from core.config import get_settings
+    settings = get_settings()
+    engine = create_engine(settings.database_url_sync)
+
+    with Session(engine) as session:
+        rows = session.execute(text("""
+            SELECT
+                agreement_code,
+                COUNT(*)                                                               AS total,
+                SUM(CASE WHEN corrected_result IS NOT DISTINCT FROM original_result THEN 1 ELSE 0 END) AS confirmed,
+                SUM(CASE WHEN corrected_result IS DISTINCT FROM original_result
+                          AND corrected_result IS NOT NULL THEN 1 ELSE 0 END)          AS overridden,
+                AVG(CASE WHEN corrected_result IS NOT DISTINCT FROM original_result THEN 1.0 ELSE 0.0 END) AS accuracy
+            FROM human_corrections
+            WHERE created_at > NOW() - INTERVAL '90 days'
+            GROUP BY agreement_code
+            ORDER BY total DESC
+        """)).fetchall()
+
+        stats = {}
+        for r in rows:
+            code, total, confirmed, overridden, accuracy = r
+            stats[code or "unknown"] = {
+                "total_reviews": int(total),
+                "confirmed": int(confirmed),
+                "overridden": int(overridden),
+                "accuracy_90d": round(float(accuracy or 0), 4),
+            }
+
+        logger.info("calibration_stats_computed", agreements=list(stats.keys()))
+
+        # Persist as JSONB in a dedicated table (created by migration 0005+)
+        try:
+            session.execute(text("""
+                INSERT INTO calibration_stats (computed_at, stats)
+                VALUES (NOW(), :stats::jsonb)
+            """), {"stats": json.dumps(stats)})
+            session.commit()
+        except Exception as exc:
+            logger.warning("calibration_stats_persist_failed", error=str(exc))
+            session.rollback()
+
+        # Refresh the in-process HistoricalCalibrator so the running worker
+        # uses updated accuracy data without a restart
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "packages", "roo-engine"))
+            from confidence import HistoricalCalibrator
+            HistoricalCalibrator._loaded = False
+            HistoricalCalibrator.load(settings.database_url_sync)
+            logger.info("confidence_calibrator_refreshed")
+        except Exception as exc:
+            logger.warning("confidence_calibrator_refresh_failed", error=str(exc))
+
+        return stats

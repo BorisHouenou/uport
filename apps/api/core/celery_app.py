@@ -57,5 +57,9 @@ celery_app.conf.update(
             "task": "finetuning_tasks.export_corrections",
             "schedule": 7 * 86400,  # every 7 days
         },
+        "compute-calibration-stats-daily": {
+            "task": "finetuning_tasks.compute_calibration_stats",
+            "schedule": 86400,  # every 24 hours — refreshes HistoricalCalibrator
+        },
     },
 )
