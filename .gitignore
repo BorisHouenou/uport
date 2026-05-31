@@ -47,3 +47,4 @@ infra/terraform/.terraform.lock.hcl
 
 # Alembic
 apps/api/alembic/versions/*.pyc
+.gstack/
