@@ -1,10 +1,21 @@
+# Railway configuration — API service (default service for this repo).
+#
+# Multi-service setup (create each in the Railway dashboard):
+#   uportai-api     → dockerfilePath = "Dockerfile.api"      (this file)
+#   uportai-worker  → dockerfilePath = "Dockerfile.worker"
+#   uportai-web     → dockerfilePath = "Dockerfile.web"
+#
+# Add-ons required:
+#   PostgreSQL  → provides DATABASE_URL (set DATABASE_URL_SYNC manually, see below)
+#   Redis       → provides REDIS_URL   (set CELERY_BROKER_URL / CELERY_RESULT_BACKEND)
+
 [build]
 builder = "dockerfile"
-dockerfilePath = "apps/api/Dockerfile"
+dockerfilePath = "Dockerfile.api"
 
 [deploy]
 startCommand = "sh -c 'alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2'"
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

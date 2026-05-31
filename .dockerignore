@@ -1,0 +1,32 @@
+## Shared dockerignore — applies to all Dockerfiles built from repo root.
+# VCS
+.git
+.gitignore
+
+# Node
+apps/web/node_modules
+apps/web/.next
+apps/web/.turbo
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.mypy_cache
+**/dist
+**/*.egg-info
+
+# Dev / local
+**/.env
+**/.env.*
+!**/.env.example
+docker-compose*.yml
+infra/
+
+# Docs / misc
+**/*.md
+SPEC.md
+README.md
+scripts/
+data/
