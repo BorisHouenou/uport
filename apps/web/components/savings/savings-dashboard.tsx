@@ -40,15 +40,18 @@ export function SavingsDashboard() {
     );
   }
 
-  if (isError || !data) {
-    return (
-      <div className="flex h-64 items-center justify-center text-sm text-slate-500">
-        Unable to load savings data. Please try again later.
-      </div>
-    );
-  }
+  const FALLBACK = {
+    kpis: { total_savings_ytd: 0, avg_saving_per_shipment: 0, certificates_issued: 0, compliance_rate: 0 },
+    monthly: DUMMY_MONTHLY,
+    by_agreement: [
+      { agreement: "CUSMA", shipments: 0, avg_rate_diff: null, savings: 0 },
+      { agreement: "CETA",  shipments: 0, avg_rate_diff: null, savings: 0 },
+      { agreement: "CPTPP", shipments: 0, avg_rate_diff: null, savings: 0 },
+    ],
+    annual_projection: 0,
+  };
 
-  const { kpis, monthly, by_agreement, annual_projection } = data;
+  const { kpis, monthly, by_agreement, annual_projection } = data ?? FALLBACK;
   const chartData = monthly.length > 0 ? monthly : DUMMY_MONTHLY;
 
   const STAT_BLOCKS = [
