@@ -37,10 +37,16 @@ class Settings(BaseSettings):
         # Ensure async URL has +asyncpg driver
         if url.startswith("postgresql://") and "+asyncpg" not in url:
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        # Railway PostgreSQL requires SSL; asyncpg needs ssl=require not sslmode=require
+        url = url.replace("sslmode=require", "ssl=require")
+        if "ssl=" not in url and "sslmode=" not in url:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}ssl=require"
         self.database_url = url
-        # Derive sync URL if not explicitly set
+        # Derive sync URL — strip asyncpg driver, convert ssl=require → sslmode=require
         if not self.database_url_sync:
-            self.database_url_sync = url.replace("+asyncpg", "")
+            sync = url.replace("+asyncpg", "").replace("ssl=require", "sslmode=require")
+            self.database_url_sync = sync
         return self
 
     # ─── Redis ────────────────────────────────────────────────
