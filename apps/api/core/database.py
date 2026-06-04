@@ -1,3 +1,4 @@
+import ssl
 from collections.abc import AsyncGenerator
 from typing import AsyncIterator
 
@@ -10,10 +11,18 @@ from core.config import get_settings
 
 settings = get_settings()
 
-# asyncpg requires ssl=require not sslmode=require — normalise the URL
-_db_url = settings.database_url.replace("?sslmode=require", "?ssl=require").replace(
-    "&sslmode=require", "&ssl=require"
-)
+# Strip SSL query params — we pass SSL via connect_args instead.
+# asyncpg doesn't reliably pick up ssl/sslmode from the URL when used
+# through SQLAlchemy; connect_args is the guaranteed path.
+_db_url = settings.database_url
+for _param in ("?ssl=require", "&ssl=require", "?sslmode=require", "&sslmode=require"):
+    _db_url = _db_url.replace(_param, "")
+
+# Railway PostgreSQL requires SSL. Use CERT_NONE since Railway uses
+# a self-signed cert on the internal network.
+_ssl_ctx = ssl.create_default_context()
+_ssl_ctx.check_hostname = False
+_ssl_ctx.verify_mode = ssl.CERT_NONE
 
 engine = create_async_engine(
     _db_url,
@@ -21,6 +30,7 @@ engine = create_async_engine(
     max_overflow=settings.db_max_overflow,
     echo=not settings.is_production,
     pool_pre_ping=True,
+    connect_args={"ssl": _ssl_ctx},
 )
 
 AsyncSessionLocal = async_sessionmaker(

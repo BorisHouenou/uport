@@ -1,4 +1,5 @@
 import asyncio
+import ssl
 from logging.config import fileConfig
 
 from alembic import context
@@ -15,9 +16,15 @@ import models  # noqa: F401
 config = context.config
 settings = get_settings()
 
-# asyncpg doesn't accept ?sslmode=require (psycopg2 syntax); replace with ?ssl=require
-_async_url = settings.database_url.replace("?sslmode=require", "?ssl=require")
+# Strip SSL query params — handled via connect_args below.
+_async_url = settings.database_url
+for _p in ("?ssl=require", "&ssl=require", "?sslmode=require", "&sslmode=require"):
+    _async_url = _async_url.replace(_p, "")
 config.set_main_option("sqlalchemy.url", _async_url)
+
+_ssl_ctx = ssl.create_default_context()
+_ssl_ctx.check_hostname = False
+_ssl_ctx.verify_mode = ssl.CERT_NONE
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -54,6 +61,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={"ssl": _ssl_ctx},
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
