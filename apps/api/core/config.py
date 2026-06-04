@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,10 +21,27 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000"
 
     # ─── Database ─────────────────────────────────────────────
+    # Railway PostgreSQL add-on sets DATABASE_URL as postgresql://...
+    # We normalise to asyncpg and derive the sync URL automatically.
     database_url: str
-    database_url_sync: str
+    database_url_sync: str = ""   # auto-derived from database_url if not set
     db_pool_size: int = 10
     db_max_overflow: int = 20
+
+    @model_validator(mode="after")
+    def normalise_database_urls(self) -> "Settings":
+        url = self.database_url
+        # Normalise postgres:// → postgresql:// (Railway uses the short form)
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://"):]
+        # Ensure async URL has +asyncpg driver
+        if url.startswith("postgresql://") and "+asyncpg" not in url:
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        self.database_url = url
+        # Derive sync URL if not explicitly set
+        if not self.database_url_sync:
+            self.database_url_sync = url.replace("+asyncpg", "")
+        return self
 
     # ─── Redis ────────────────────────────────────────────────
     redis_url: str = "redis://localhost:6379/0"
