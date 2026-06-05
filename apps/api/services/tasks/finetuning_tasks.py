@@ -11,6 +11,8 @@ Format (Anthropic Messages API fine-tuning format):
       {"role": "assistant", "content": "<corrected result JSON>"}
   ]}
 """
+from __future__ import annotations
+
 import json
 from datetime import datetime, timezone
 
