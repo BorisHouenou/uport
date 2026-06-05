@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlparse, urlunparse
 
 from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -58,7 +59,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def derive_celery_urls(self) -> "Settings":
-        base = self.redis_url.rstrip("/").rsplit("/", 1)[0]
+        parsed = urlparse(self.redis_url)
+        base = urlunparse(parsed._replace(path=""))
         if not self.celery_broker_url:
             self.celery_broker_url = f"{base}/1"
         if not self.celery_result_backend:
