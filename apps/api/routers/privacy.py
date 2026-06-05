@@ -9,11 +9,11 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update, delete, text
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
-from middleware.auth import AdminUser, CurrentUser
+from middleware.auth import AdminUser
 from models import (
     Organization, User, Shipment, OriginDetermination,
     Certificate, SupplierDeclaration, AuditEvent,

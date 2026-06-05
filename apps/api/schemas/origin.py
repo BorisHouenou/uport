@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from schemas.base import TaskResponse, TimestampMixin, UportaiBase
+from schemas.base import TaskResponse, UportaiBase
 
 RuleType = Literal["tariff_shift", "rvc_build_down", "rvc_build_up", "rvc_net_cost", "wholly_obtained"]
 DeterminationStatus = Literal["queued", "processing", "completed", "failed", "needs_review"]

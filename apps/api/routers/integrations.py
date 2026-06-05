@@ -1,6 +1,5 @@
 """Third-party integration endpoints (QuickBooks Online, etc.)."""
 import secrets
-from urllib.parse import urljoin
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -22,7 +21,8 @@ async def qbo_connect(
     current_user: CurrentUser,
 ):
     """Return the QBO OAuth2 authorization URL."""
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations"))
     from quickbooks.oauth import get_auth_url
 
@@ -40,7 +40,8 @@ async def qbo_callback(
     db: AsyncSession = Depends(get_db),
 ):
     """Handle QBO OAuth2 callback and persist tokens."""
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations"))
     from quickbooks.oauth import exchange_code
     from services.integration_service import save_qbo_tokens
@@ -84,7 +85,8 @@ async def qbo_items(
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch Items from QBO and return as BOM-compatible rows."""
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations"))
     from quickbooks.client import QuickBooksClient, qbo_item_to_bom_row
     from services.integration_service import get_qbo_connection, maybe_refresh_qbo_token
@@ -118,7 +120,8 @@ async def qbo_import_bom(
     db: AsyncSession = Depends(get_db),
 ):
     """Import QBO items as BOM lines for a product, triggering AI HS classification."""
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations"))
     from quickbooks.client import QuickBooksClient, qbo_item_to_bom_row
     from services.integration_service import get_qbo_connection, maybe_refresh_qbo_token
@@ -229,7 +232,8 @@ async def flexport_sync_shipments(
     db: AsyncSession = Depends(get_db),
 ):
     """Pull Flexport shipments and create Uportai shipment records."""
-    import sys, uuid as _uuid
+    import sys
+    import uuid as _uuid
     sys.path.insert(0, _INTEGRATIONS_PATH)
     from flexport.client import FlexportClient
     from models import Shipment
@@ -320,7 +324,8 @@ async def shipbob_sync_shipments(
     db: AsyncSession = Depends(get_db),
 ):
     """Pull ShipBob shipments and create Uportai shipment records."""
-    import sys, uuid as _uuid
+    import sys
+    import uuid as _uuid
     sys.path.insert(0, _INTEGRATIONS_PATH)
     from shipbob.client import ShipbobClient
     from models import Shipment

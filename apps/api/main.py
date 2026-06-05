@@ -1,9 +1,10 @@
 """Uportai API — FastAPI entrypoint."""
+import logging as _logging
+
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -19,7 +20,6 @@ from routers import (
 settings = get_settings()
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
-import logging as _logging
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
         _logging.getLevelName(settings.log_level)

@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 import boto3
 from fastapi import UploadFile
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
@@ -91,7 +91,7 @@ async def attach_document(
     s3_key = f"supplier-docs/{org_id}/{declaration_id}/{file.filename}"
 
     if settings.environment == "development":
-        import os, pathlib
+        import pathlib
         path = pathlib.Path(f"/tmp/{s3_key}")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)

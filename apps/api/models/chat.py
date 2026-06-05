@@ -1,13 +1,11 @@
 import uuid
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
-from models.base import TimestampMixin
 
 
 class ChatMessage(Base):

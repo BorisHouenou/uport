@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
@@ -13,7 +13,6 @@ from models import OriginDetermination, Shipment, HumanCorrection
 from schemas.origin import (
     OriginDeterminationCreate,
     OriginDeterminationResponse,
-    OriginQueryRequest,
     OriginQueryResponse,
 )
 
@@ -61,8 +60,6 @@ async def determine_origin(
     shipment = ship_result.scalar_one_or_none()
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
-
-    task_id = str(uuid.uuid4())
 
     # ── Inline determination (no Celery worker required) ──────────────────────
     from models import Product, BOMItem

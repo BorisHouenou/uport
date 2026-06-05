@@ -5,7 +5,6 @@ module (which has heavy SQLAlchemy + Stripe deps that aren't installed here).
 """
 import ast
 import os
-import pytest
 
 _SRC = os.path.join(os.path.dirname(__file__), "..", "services", "billing_service.py")
 

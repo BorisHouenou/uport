@@ -1,9 +1,9 @@
 """Unit tests for supplier_service helpers (pure date logic, no DB)."""
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from datetime import date, timedelta
-import pytest
 
 
 class TestExpiryLogic:
@@ -48,7 +48,8 @@ class TestSchemaNormalization:
 
     def test_supplier_declaration_create_required_fields(self):
         """All required fields should be present in schema."""
-        import sys, os
+        import sys
+        import os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         from schemas.suppliers import SupplierDeclarationCreate
         import uuid

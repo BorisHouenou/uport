@@ -2,7 +2,6 @@
 AI Celery tasks — Sprint 3-4 implementation.
 Bridges the API layer to the AI agent packages.
 """
-import json
 import os
 import sys
 

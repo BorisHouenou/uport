@@ -4,7 +4,6 @@ import uuid
 from datetime import date
 
 import structlog
-from celery import shared_task
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from models.correction import HumanCorrection
 
 import structlog
 
@@ -168,7 +172,8 @@ def compute_calibration_stats(self):
         # Refresh the in-process HistoricalCalibrator so the running worker
         # uses updated accuracy data without a restart
         try:
-            import sys, os
+            import sys
+            import os
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "packages", "roo-engine"))
             from confidence import HistoricalCalibrator
             HistoricalCalibrator._loaded = False

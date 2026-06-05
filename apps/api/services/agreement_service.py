@@ -1,5 +1,4 @@
 """Trade agreement and RoO rules DB service layer."""
-import uuid
 
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,12 +11,10 @@ async def get_applicable_agreements(
     origin_country: str | None,
     destination_country: str | None,
 ) -> dict:
-    query = select(TradeAgreement).where(TradeAgreement.is_active == True)
+    query = select(TradeAgreement).where(TradeAgreement.is_active.is_(True))
     if origin_country and destination_country:
         # Filter to agreements where both countries are parties
         # Using array contains operator for PostgreSQL ARRAY type
-        from sqlalchemy import cast, String
-        from sqlalchemy.dialects.postgresql import ARRAY
         query = query.where(
             TradeAgreement.parties.contains([origin_country.upper()])
         ).where(

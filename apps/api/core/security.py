@@ -1,7 +1,4 @@
 """Security utilities: JWT verification, Clerk token validation."""
-import hashlib
-import hmac
-from datetime import UTC, datetime
 
 import httpx
 from fastapi import HTTPException, status

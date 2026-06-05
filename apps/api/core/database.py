@@ -1,6 +1,5 @@
 import ssl
 from collections.abc import AsyncGenerator
-from typing import AsyncIterator
 
 from fastapi import Request
 from sqlalchemy import text

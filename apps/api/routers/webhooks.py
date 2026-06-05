@@ -1,5 +1,5 @@
 """Incoming webhook handlers (Stripe, Clerk)."""
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, Request
 
 from core.config import get_settings
 from core.database import get_db
@@ -16,7 +16,6 @@ async def stripe_webhook(
     db: AsyncSession = Depends(get_db),
 ):
     """Handle Stripe subscription lifecycle events."""
-    import stripe as stripe_lib
     from core.security import verify_stripe_webhook
     from services.billing_service import (
         handle_checkout_completed,

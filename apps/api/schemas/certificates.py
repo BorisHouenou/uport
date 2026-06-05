@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from schemas.base import TaskResponse, TimestampMixin, UportaiBase
+from schemas.base import TaskResponse, UportaiBase
 
 CertType = Literal["cusma", "eur1", "form_a", "generic"]
 

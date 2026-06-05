@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from middleware.auth import CurrentUser
-from schemas.assistant import AssistantMessage, AssistantChatRequest
+from schemas.assistant import AssistantChatRequest
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 _limiter = Limiter(key_func=get_remote_address)

@@ -52,7 +52,8 @@ async def get_qbo_connection(db: AsyncSession, org_id: str) -> dict[str, Any] | 
 
 
 async def remove_qbo_connection(db: AsyncSession, org_id: str) -> None:
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations"))
     try:
         from quickbooks.oauth import revoke_token
@@ -80,7 +81,8 @@ async def maybe_refresh_qbo_token(
     if age < expires_in - 300:
         return conn["access_token"]
 
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations"))
     from quickbooks.oauth import refresh_token
 

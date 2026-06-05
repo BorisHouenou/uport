@@ -1,7 +1,6 @@
 """Certificate generation, storage, and retrieval service."""
 from __future__ import annotations
 
-import io
 import os
 import sys
 import uuid
@@ -167,7 +166,8 @@ def generate_and_store_certificate_sync(
 
 def _build_cert_data(ship, det, org, product, cert_type: str):
     from models_cert import CertificateData, ExporterInfo, ImporterInfo, GoodLine
-    import random, string
+    import random
+    import string
 
     cert_number = "UP-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
     origin_criterion = _infer_origin_criterion(det)
