@@ -50,9 +50,20 @@ class Settings(BaseSettings):
         return self
 
     # ─── Redis ────────────────────────────────────────────────
+    # Railway's Redis add-on injects REDIS_URL automatically.
+    # CELERY_BROKER_URL / CELERY_RESULT_BACKEND are derived from it when not set.
     redis_url: str = "redis://localhost:6379/0"
-    celery_broker_url: str = "redis://localhost:6379/1"
-    celery_result_backend: str = "redis://localhost:6379/2"
+    celery_broker_url: str = ""
+    celery_result_backend: str = ""
+
+    @model_validator(mode="after")
+    def derive_celery_urls(self) -> "Settings":
+        base = self.redis_url.rstrip("/").rsplit("/", 1)[0]
+        if not self.celery_broker_url:
+            self.celery_broker_url = f"{base}/1"
+        if not self.celery_result_backend:
+            self.celery_result_backend = f"{base}/2"
+        return self
 
     # ─── Auth (Clerk) ─────────────────────────────────────────
     clerk_secret_key: str = ""
