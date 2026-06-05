@@ -1,8 +1,5 @@
-# Root railway.toml — intentionally minimal.
-# Each service uses its own config file (set via Config File Path in Railway dashboard):
+# Per-service config files handle all build/deploy settings.
+# Set "Config File Path" per service in Railway dashboard:
 #   API service    → railway.api.toml
 #   Worker service → railway.worker.toml
 #   Web service    → railway.web.toml
-
-[build]
-builder = "dockerfile"
