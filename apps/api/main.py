@@ -16,6 +16,7 @@ from routers import (
     agreements, assistant, audit, billing, bom, certificates,
     health, integrations, origin, outbound_webhooks, privacy, savings, suppliers, webhooks,
 )
+from routers import products, shipments
 
 settings = get_settings()
 
@@ -74,6 +75,8 @@ if settings.sentry_dsn:
 API_PREFIX = "/api/v1"
 
 app.include_router(health.router)
+app.include_router(products.router, prefix=API_PREFIX)
+app.include_router(shipments.router, prefix=API_PREFIX)
 app.include_router(origin.router, prefix=API_PREFIX)
 app.include_router(bom.router, prefix=API_PREFIX)
 app.include_router(certificates.router, prefix=API_PREFIX)

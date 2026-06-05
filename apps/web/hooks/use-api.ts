@@ -2,6 +2,37 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
 
+// ─── Products ─────────────────────────────────────────────────────────────────
+export function useProducts() {
+  return useQuery({
+    queryKey: ["products"],
+    queryFn: () => apiClient.get("/products").then(r => r.data),
+  });
+}
+
+export function useCreateProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; description?: string; hs_code?: string; origin_country?: string }) =>
+      apiClient.post("/products", data).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["products"] }),
+  });
+}
+
+// ─── Shipments ────────────────────────────────────────────────────────────────
+export function useCreateShipment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      product_id: string;
+      destination_country: string;
+      origin_country: string;
+      shipment_value_usd?: number;
+    }) => apiClient.post("/shipments", data).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shipments"] }),
+  });
+}
+
 // ─── Certificates ─────────────────────────────────────────────────────────────
 export function useCertificates(page = 1) {
   return useQuery({

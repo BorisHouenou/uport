@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ShipmentForm } from "./shipment-form";
 import { DeterminationResults } from "./determination-results";
+import { useRunDetermination } from "@/hooks/use-api";
 import { CheckCircle2, Loader2, ShieldCheck, FileText, Zap } from "lucide-react";
 
 type WizardStep = "shipment" | "processing" | "results";
@@ -16,8 +18,37 @@ const STEPS: StepInfo[] = [
 ];
 
 export function OriginWizard() {
+  const searchParams = useSearchParams();
+  const prefilledShipmentId = searchParams.get("shipment_id");
+  const autoRun = searchParams.get("run") === "1";
+
   const [step, setStep] = useState<WizardStep>("shipment");
   const [determinationId, setDeterminationId] = useState<string | null>(null);
+
+  const runDetermination = useRunDetermination();
+
+  // Auto-run determination when arriving from BOM flow
+  useEffect(() => {
+    if (!prefilledShipmentId || !autoRun) return;
+
+    setStep("processing");
+    runDetermination.mutateAsync({
+      shipment_id: prefilledShipmentId,
+      agreement_codes: [],
+    }).then(result => {
+      setDeterminationId(result.task_id);
+      setStep("results");
+    }).catch(() => {
+      setStep("shipment");
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleFormSubmit = (taskId: string) => {
+    setDeterminationId(taskId);
+    setStep("processing");
+    setTimeout(() => setStep("results"), 500);
+  };
 
   const stepIndex = STEPS.findIndex(s => s.key === step);
 
@@ -27,8 +58,8 @@ export function OriginWizard() {
       <div className="rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-card">
         <div className="flex items-center">
           {STEPS.map((s, i) => {
-            const done    = i < stepIndex;
-            const active  = i === stepIndex;
+            const done   = i < stepIndex;
+            const active = i === stepIndex;
             return (
               <div key={s.key} className="flex flex-1 items-center">
                 <div className="flex items-center gap-3">
@@ -63,11 +94,8 @@ export function OriginWizard() {
       {/* Step content */}
       {step === "shipment" && (
         <ShipmentForm
-          onSubmit={(taskId) => {
-            setDeterminationId(taskId);
-            setStep("processing");
-            setTimeout(() => setStep("results"), 500);
-          }}
+          prefilledShipmentId={prefilledShipmentId ?? undefined}
+          onSubmit={handleFormSubmit}
         />
       )}
 

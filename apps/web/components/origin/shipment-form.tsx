@@ -9,6 +9,7 @@ import { ArrowRight, ShieldCheck } from "lucide-react";
 
 const COUNTRIES = [
   { code: "US", name: "United States" },
+  { code: "CA", name: "Canada" },
   { code: "MX", name: "Mexico" },
   { code: "DE", name: "Germany" },
   { code: "FR", name: "France" },
@@ -22,10 +23,11 @@ const AGREEMENTS = ["cusma", "ceta", "cptpp", "ckfta"];
 
 interface ShipmentFormProps {
   onSubmit: (taskId: string) => void;
+  prefilledShipmentId?: string;
 }
 
-export function ShipmentForm({ onSubmit }: ShipmentFormProps) {
-  const [shipmentId, setShipmentId] = useState("");
+export function ShipmentForm({ onSubmit, prefilledShipmentId }: ShipmentFormProps) {
+  const [shipmentId, setShipmentId] = useState(prefilledShipmentId ?? "");
   const [destination, setDestination] = useState("US");
   const [selectedAgreements, setSelectedAgreements] = useState<string[]>([]);
   const runDetermination = useRunDetermination();
@@ -58,7 +60,9 @@ export function ShipmentForm({ onSubmit }: ShipmentFormProps) {
           Shipment Details
         </CardTitle>
         <CardDescription>
-          Enter the shipment ID and destination. We will automatically identify applicable trade agreements.
+          {prefilledShipmentId
+            ? "Shipment pre-loaded from your BOM. Select trade agreements and run."
+            : "Enter the shipment ID and destination. We will automatically identify applicable trade agreements."}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -71,8 +75,13 @@ export function ShipmentForm({ onSubmit }: ShipmentFormProps) {
                 type="text"
                 value={shipmentId}
                 onChange={e => setShipmentId(e.target.value)}
-                placeholder="e.g. SH-2026-001"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                placeholder="UUID from shipment record"
+                readOnly={!!prefilledShipmentId}
+                className={`w-full rounded-lg border px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 ${
+                  prefilledShipmentId
+                    ? "border-brand-200 bg-brand-50 text-brand-700 cursor-default"
+                    : "border-slate-200 bg-white"
+                }`}
               />
             </div>
 
@@ -91,7 +100,7 @@ export function ShipmentForm({ onSubmit }: ShipmentFormProps) {
             </div>
           </div>
 
-          {/* Agreement filter (optional) */}
+          {/* Agreement filter */}
           <div className="space-y-2">
             <label className="text-xs font-medium text-slate-700">
               Trade Agreements{" "}
