@@ -56,6 +56,13 @@ export function useBOMItems(productId: string | null) {
     queryKey: ["bom", productId],
     queryFn: () => apiClient.get(`/bom/${productId}/items`).then(r => r.data),
     enabled: !!productId,
+    refetchInterval: (query) => {
+      const items = (query.state.data as any)?.items;
+      // Poll every 2s until items appear and all have an hs_code (classification done)
+      if (!items || items.length === 0) return 2000;
+      const allClassified = items.every((i: any) => i.hs_code);
+      return allClassified ? false : 2000;
+    },
   });
 }
 
