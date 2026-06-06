@@ -32,8 +32,8 @@ from tools import CLAUDE_TOOLS, dispatch_tool
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
-MAX_TOOL_ROUNDS = 10
-MAX_TOKENS = 2048
+MAX_TOOL_ROUNDS = 15
+MAX_TOKENS = 4096
 
 
 # ─── Input / output models ─────────────────────────────────────────────────────

@@ -219,7 +219,13 @@ export function BOMUploadPanel() {
 
               {bomData?.items?.length > 0 && (
                 !showOriginDialog ? (
-                  <Button size="sm" className="gap-1.5" onClick={() => setShowOriginDialog(true)}>
+                  <Button
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setShowOriginDialog(true)}
+                    disabled={!bomData.items.every((i: any) => i.hs_code)}
+                    title={!bomData.items.every((i: any) => i.hs_code) ? "Waiting for HS code classification to complete…" : undefined}
+                  >
                     Run Origin Check <ArrowRight className="h-3.5 w-3.5" />
                   </Button>
                 ) : (

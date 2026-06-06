@@ -202,8 +202,18 @@ async def determine_origin(
         for b in bom_rows
     ]
 
+    # Derive product HS code: prefer explicit, fall back to highest-cost BOM item
+    effective_hs = (product.hs_code or "").strip() if product else ""
+    if not effective_hs:
+        classified = [(b.hs_code, float(b.unit_cost or 0) * float(b.quantity or 0))
+                      for b in bom_rows if b.hs_code]
+        if classified:
+            effective_hs = max(classified, key=lambda x: x[1])[0]
+        else:
+            effective_hs = "0000"
+
     ship_input_dict = {
-        "hs_code": (product.hs_code or "0000") if product else "0000",
+        "hs_code": effective_hs,
         "product_description": (product.name or "Unknown product") if product else "Unknown product",
         "production_country": shipment.origin_country or "XX",
         "destination_country": shipment.destination_country or "XX",
