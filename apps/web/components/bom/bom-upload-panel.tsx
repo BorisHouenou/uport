@@ -7,7 +7,7 @@ import { BOMItemsTable } from "./bom-items-table";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useUploadBOM, useBOMItems, useCreateProduct, useProducts, useCreateShipment } from "@/hooks/use-api";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, PackageSearch, Plus, ChevronDown } from "lucide-react";
+import { ArrowRight, PackageSearch, Plus, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 
 const COUNTRIES = [
@@ -33,6 +33,7 @@ export function BOMUploadPanel() {
   // Origin check state
   const [showOriginDialog, setShowOriginDialog] = useState(false);
   const [destination, setDestination] = useState("US");
+  const [hasUploaded, setHasUploaded] = useState(false);
 
   const { data: products = [] } = useProducts();
   const createProduct = useCreateProduct();
@@ -59,6 +60,7 @@ export function BOMUploadPanel() {
   const handleUpload = async (file: File) => {
     if (!productId) { toast.error("Select or create a product first"); return; }
     await uploadBOM.mutateAsync({ productId, file });
+    setHasUploaded(true);
     toast.success("BOM uploaded — classifying HS codes…");
   };
 
@@ -197,52 +199,65 @@ export function BOMUploadPanel() {
       )}
 
       {/* Step 3: BOM results + Run Origin Check */}
-      {productId && (bomData?.items?.length > 0 || bomLoading) && (
+      {productId && (hasUploaded || bomData?.items?.length > 0 || bomLoading) && (
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>BOM Line Items</CardTitle>
                 <CardDescription>
-                  {bomData?.total_items ?? "—"} items · Foreign content:{" "}
-                  <span className="font-semibold text-slate-700">
-                    {bomData?.foreign_content_pct ?? "—"}%
-                  </span>
+                  {bomData?.total_items
+                    ? `${bomData.total_items} items · Foreign content: `
+                    : "Classifying HS codes — this takes ~15–30 seconds…"}
+                  {bomData?.total_items ? (
+                    <span className="font-semibold text-slate-700">
+                      {bomData.foreign_content_pct}%
+                    </span>
+                  ) : null}
                 </CardDescription>
               </div>
 
-              {!showOriginDialog ? (
-                <Button size="sm" className="gap-1.5" onClick={() => setShowOriginDialog(true)}>
-                  Run Origin Check <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <select
-                    value={destination}
-                    onChange={e => setDestination(e.target.value)}
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  >
-                    {COUNTRIES.filter(c => c.code !== (selectedProduct?.origin_country || "CA")).map(c => (
-                      <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
-                    ))}
-                  </select>
-                  <Button
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={handleRunOriginCheck}
-                    loading={createShipment.isPending}
-                  >
-                    Go <ArrowRight className="h-3.5 w-3.5" />
+              {bomData?.items?.length > 0 && (
+                !showOriginDialog ? (
+                  <Button size="sm" className="gap-1.5" onClick={() => setShowOriginDialog(true)}>
+                    Run Origin Check <ArrowRight className="h-3.5 w-3.5" />
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setShowOriginDialog(false)}>
-                    Cancel
-                  </Button>
-                </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={destination}
+                      onChange={e => setDestination(e.target.value)}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      {COUNTRIES.filter(c => c.code !== (selectedProduct?.origin_country || "CA")).map(c => (
+                        <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={handleRunOriginCheck}
+                      loading={createShipment.isPending}
+                    >
+                      Go <ArrowRight className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setShowOriginDialog(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                )
               )}
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <BOMItemsTable items={bomData?.items ?? []} isLoading={bomLoading} />
+            {hasUploaded && !bomData?.items?.length && !bomLoading ? (
+              <div className="flex items-center gap-3 px-6 py-8 text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 animate-spin text-brand-500 shrink-0" />
+                Classifying HS codes with AI — the table will appear automatically when done.
+              </div>
+            ) : (
+              <BOMItemsTable items={bomData?.items ?? []} isLoading={bomLoading} />
+            )}
           </CardContent>
         </Card>
       )}
