@@ -1,9 +1,12 @@
 """Origin determination endpoints."""
 
+import logging
 import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -113,7 +116,14 @@ async def determine_origin(
         agreement_codes=payload.agreement_codes or [],
     )
 
-    engine_result = run_origin_determination(ship_input)
+    try:
+        engine_result = run_origin_determination(ship_input)
+    except Exception as exc:
+        logger.exception("Origin determination engine failed for shipment %s", shipment_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Origin engine error: {type(exc).__name__}: {exc}",
+        ) from exc
 
     _AGREEMENT_NAMES = {
         "cusma": "Canada-United States-Mexico Agreement",

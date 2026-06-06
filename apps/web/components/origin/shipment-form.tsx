@@ -47,8 +47,9 @@ export function ShipmentForm({ onSubmit, prefilledShipmentId }: ShipmentFormProp
         agreement_codes: selectedAgreements,
       });
       onSubmit(result.task_id);
-    } catch {
-      toast.error("Failed to start determination — check shipment ID");
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || "Unknown error";
+      toast.error(`Determination failed: ${detail}`);
     }
   };
 

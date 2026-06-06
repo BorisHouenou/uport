@@ -7,6 +7,7 @@ import { ShipmentForm } from "./shipment-form";
 import { DeterminationResults } from "./determination-results";
 import { useRunDetermination } from "@/hooks/use-api";
 import { CheckCircle2, Loader2, ShieldCheck, FileText, Zap } from "lucide-react";
+import toast from "react-hot-toast";
 
 type WizardStep = "shipment" | "processing" | "results";
 
@@ -38,7 +39,9 @@ export function OriginWizard() {
     }).then(result => {
       setDeterminationId(result.task_id);
       setStep("results");
-    }).catch(() => {
+    }).catch((err: any) => {
+      const detail = err?.response?.data?.detail || err?.message || "Unknown error";
+      toast.error(`Auto-determination failed: ${detail}`);
       setStep("shipment");
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
