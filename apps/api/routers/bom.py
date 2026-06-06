@@ -41,6 +41,21 @@ async def upload_bom(
     Parses inline, AI-classifies missing HS codes in a single batch call,
     then saves. Returns after commit with status="completed".
     """
+    try:
+        return await _upload_bom_inner(product_id, current_user, file, db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("BOM upload failed for product %s", product_id)
+        raise HTTPException(status_code=500, detail=f"Upload error: {type(exc).__name__}: {exc}") from exc
+
+
+async def _upload_bom_inner(
+    product_id: uuid.UUID,
+    current_user: CurrentUser,
+    file: UploadFile,
+    db: AsyncSession,
+):
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
