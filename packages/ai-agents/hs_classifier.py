@@ -170,10 +170,68 @@ def _parse_result(text: str, tool_calls_made: int) -> HSClassificationResult:
 
 def classify_batch(items: list[dict]) -> list[HSClassificationResult]:
     """
-    Classify multiple BOM line items.
+    Classify multiple BOM line items in a single Claude call.
+
     items: list of {"description": str, "context": str (optional)}
+
+    Returns one HSClassificationResult per input item, in order.
+    Falls back to per-item classify() if the batch call fails.
     """
-    return [
-        classify(item["description"], item.get("context", ""))
-        for item in items
-    ]
+    if not items:
+        return []
+
+    numbered = "\n".join(
+        f"{i + 1}. {it['description']}"
+        + (f" [{it['context']}]" if it.get("context") else "")
+        for i, it in enumerate(items)
+    )
+
+    prompt = (
+        "Classify each product into its most accurate 6-digit HS code.\n\n"
+        f"Products:\n{numbered}\n\n"
+        "Return ONLY a JSON array with one object per product, in the same order:\n"
+        '[{"hs_code":"847130","hs_description":"...","chapter":"84","confidence":0.95,"reasoning":"..."}]\n'
+        "If you cannot classify a product use confidence 0.0 and hs_code null. Raw JSON only, no markdown."
+    )
+
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            parts = text.split("```")
+            text = parts[1] if len(parts) > 1 else text
+            if text.startswith("json"):
+                text = text[4:]
+        text = text.strip()
+
+        data = json.loads(text)
+        results = []
+        for entry in data:
+            hs = entry.get("hs_code") or "0000.00"
+            conf = float(entry.get("confidence") or 0.0)
+            results.append(HSClassificationResult(
+                hs_code=hs,
+                hs_description=entry.get("hs_description", ""),
+                chapter=entry.get("chapter", hs[:2] if len(hs) >= 2 else "00"),
+                confidence=conf,
+                reasoning=entry.get("reasoning", ""),
+            ))
+
+        # Pad if Claude returned fewer items than expected (shouldn't happen)
+        while len(results) < len(items):
+            results.append(HSClassificationResult(
+                hs_code="0000.00",
+                hs_description="Classification incomplete",
+                chapter="00",
+                confidence=0.0,
+                reasoning="Batch response was shorter than input list",
+            ))
+        return results
+
+    except Exception:
+        # Fallback: classify one by one
+        return [classify(it["description"], it.get("context", "")) for it in items]

@@ -56,12 +56,14 @@ export function useBOMItems(productId: string | null) {
     queryKey: ["bom", productId],
     queryFn: () => apiClient.get(`/bom/${productId}/items`).then(r => r.data),
     enabled: !!productId,
+    // Upload is now inline — items arrive on first fetch after upload.
+    // Keep a short poll only while items exist but some still lack hs_code
+    // (handles re-uploads mid-session).
     refetchInterval: (query) => {
       const items = (query.state.data as any)?.items;
-      // Poll every 2s until items appear and all have an hs_code (classification done)
-      if (!items || items.length === 0) return 2000;
+      if (!items || items.length === 0) return false;
       const allClassified = items.every((i: any) => i.hs_code);
-      return allClassified ? false : 2000;
+      return allClassified ? false : 3000;
     },
   });
 }
