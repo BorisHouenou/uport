@@ -18,12 +18,16 @@ Claude decides when it has enough information to produce the final JSON determin
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import sys
 from typing import Any
 
 import anthropic
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 # Add roo-engine to path so engine models are importable directly
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "roo-engine"))
@@ -203,6 +207,50 @@ def run_origin_determination(
     )
 
 
+def _bracket_extract(text: str) -> str:
+    """Return the first complete JSON object from text via bracket counting."""
+    start = text.find('{')
+    if start == -1:
+        return text
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(text[start:], start):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return text[start:]  # truncated — let json.loads produce a clear error
+
+
+def _extract_json_object(text: str) -> str:
+    """
+    Extract the first complete JSON object from text.
+    Handles markdown fences anywhere in the text and bare JSON with surrounding prose.
+    """
+    # Look for a fenced block (with or without preamble before the fence)
+    fence_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+    if fence_match:
+        # Run bracket extraction on the fenced content (may itself have prose)
+        return _bracket_extract(fence_match.group(1).strip())
+
+    # No fence — bracket-match directly in the full text
+    return _bracket_extract(text)
+
+
 def _parse_result(
     text: str,
     shipment: ShipmentInput,
@@ -210,17 +258,12 @@ def _parse_result(
     tool_calls_made: int,
 ) -> OriginDeterminationOutput:
     """Parse Claude's final JSON output into OriginDeterminationOutput."""
-    text = text.strip()
-    # Strip markdown fences
-    if text.startswith("```"):
-        parts = text.split("```")
-        text = parts[1] if len(parts) > 1 else text
-        if text.startswith("json"):
-            text = text[4:]
-    text = text.strip()
+    raw = text.strip()
+    logger.info("Origin agent raw output (%d chars): %.500s", len(raw), raw)
 
     try:
-        data = json.loads(text)
+        candidate = _extract_json_object(raw)
+        data = json.loads(candidate)
         return OriginDeterminationOutput(
             shipment_id=shipment_id,
             hs_code=shipment.hs_code,
@@ -238,6 +281,9 @@ def _parse_result(
             tool_calls_made=tool_calls_made,
         )
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        logger.warning(
+            "Failed to parse origin agent output: %s\nFull text: %s", exc, raw
+        )
         return OriginDeterminationOutput(
             shipment_id=shipment_id,
             hs_code=shipment.hs_code,
