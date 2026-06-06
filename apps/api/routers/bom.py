@@ -1,11 +1,12 @@
 """Bill of Materials upload and management endpoints."""
 
+import logging
 import os
 import sys
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
@@ -14,12 +15,16 @@ from models import BOMItem, Product
 from schemas.bom import BOMUploadResponse, BOMItemList
 
 router = APIRouter(prefix="/bom", tags=["bom"])
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json"}
 MAX_FILE_SIZE_MB = 10
 
-# Add ai-agents package to path once at import time
-_AI_AGENTS = os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "ai-agents")
+# Packages are on PYTHONPATH in production (Dockerfile sets it).
+# Add the local path as fallback for dev.
+_AI_AGENTS = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "ai-agents")
+)
 if _AI_AGENTS not in sys.path:
     sys.path.insert(0, _AI_AGENTS)
 
@@ -33,7 +38,8 @@ async def upload_bom(
 ):
     """
     Upload a Bill of Materials file (CSV, Excel, JSON).
-    Parses and AI-classifies HS codes inline; returns immediately after saving.
+    Parses inline, AI-classifies missing HS codes in a single batch call,
+    then saves. Returns after commit with status="completed".
     """
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -49,8 +55,11 @@ async def upload_bom(
             detail=f"File exceeds {MAX_FILE_SIZE_MB}MB limit",
         )
 
-    from sqlalchemy import select
-    org_id = current_user["org_id"]
+    # Verify product belongs to this org
+    org_id = current_user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No organization associated with this account")
+
     product = (
         await db.execute(
             select(Product).where(
@@ -68,36 +77,39 @@ async def upload_bom(
     if not rows:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No valid rows found in BOM file. Check that it has a 'description' column.",
+            detail="No valid rows found. Check the file has a 'description' column.",
         )
 
-    # ── Batch-classify items missing HS codes (single Claude call) ────────────
-    unclassified_idx = [i for i, r in enumerate(rows) if not r.hs_code and r.description]
-    if unclassified_idx:
-        from hs_classifier import classify_batch
-        batch_input = [{"description": rows[i].description} for i in unclassified_idx]
-        batch_results = classify_batch(batch_input)
-        for list_pos, row_idx in enumerate(unclassified_idx):
-            result = batch_results[list_pos]
-            if result.confidence >= 0.5:
-                rows[row_idx].hs_code = result.hs_code
+    # ── Batch-classify items missing HS codes (one Claude call for all) ───────
+    # Map: row index → (hs_code, confidence) for items we classified
+    ai_results: dict[int, tuple[str, float]] = {}
+
+    unclassified = [(i, r) for i, r in enumerate(rows) if not r.hs_code and r.description]
+    if unclassified:
+        try:
+            from hs_classifier import classify_batch
+            batch_results = classify_batch([{"description": r.description} for _, r in unclassified])
+            for (row_idx, _), result in zip(unclassified, batch_results):
+                if result.confidence >= 0.5:
+                    rows[row_idx].hs_code = result.hs_code
+                    ai_results[row_idx] = (result.hs_code, result.confidence)
+        except Exception as exc:
+            # Classification is best-effort — save without HS codes rather than fail the upload
+            logger.warning("HS batch classification failed, saving without codes: %s", exc)
 
     # ── Persist (replace existing BOM for this product) ───────────────────────
     await db.execute(delete(BOMItem).where(BOMItem.product_id == product_id))
 
-    batch_results_map: dict[int, float] = {}
-    if unclassified_idx:
-        for list_pos, row_idx in enumerate(unclassified_idx):
-            r = batch_results[list_pos]  # type: ignore[possibly-undefined]
-            if r.confidence >= 0.5:
-                batch_results_map[row_idx] = r.confidence
-
     for i, row in enumerate(rows):
-        hs_confidence = batch_results_map.get(i) if i in batch_results_map else None
-        classified_by = (
-            "ai" if i in batch_results_map
-            else ("imported" if row.hs_code else "manual")
-        )
+        hs_confidence: float | None = None
+        classified_by = "manual"
+
+        if i in ai_results:
+            hs_confidence = ai_results[i][1]
+            classified_by = "ai"
+        elif row.hs_code:
+            classified_by = "imported"
+
         db.add(BOMItem(
             id=uuid.uuid4(),
             product_id=product_id,
