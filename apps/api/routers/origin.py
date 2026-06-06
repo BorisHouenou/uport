@@ -23,6 +23,46 @@ from schemas.origin import (
 
 logger = logging.getLogger(__name__)
 
+# ─── FTA party lookups (for is_originating derivation) ────────────────────────
+_FTA_PARTIES: dict[str, frozenset[str]] = {
+    "cusma":  frozenset({"CA", "US", "MX"}),
+    "ceta":   frozenset({"CA", "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE",
+                          "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT",
+                          "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"}),
+    "cptpp":  frozenset({"AU", "BN", "CA", "CL", "JP", "MX", "MY", "NZ", "PE", "SG", "VN"}),
+    "afcfta": frozenset({"DZ", "AO", "BJ", "BW", "BF", "BI", "CM", "CV", "CF",
+                          "TD", "KM", "CG", "CD", "CI", "DJ", "EG", "GQ", "ER",
+                          "SZ", "ET", "GA", "GM", "GH", "GN", "GW", "KE", "LS",
+                          "LR", "LY", "MG", "MW", "ML", "MR", "MU", "MA", "MZ",
+                          "NA", "NE", "NG", "RW", "ST", "SN", "SL", "SO", "ZA",
+                          "SS", "SD", "TZ", "TG", "TN", "UG", "ZM", "ZW"}),
+}
+
+
+def _infer_is_originating(
+    item_origin: str | None,
+    prod_country: str,
+    dest_country: str,
+) -> bool | None:
+    """
+    Derive is_originating for a BOM item based on FTA membership.
+    Returns True if the item's origin country is a party to the FTA
+    that covers the prod→dest corridor, False if definitely non-party, None if unknown.
+    """
+    if not item_origin:
+        return None
+    item = item_origin.upper()
+    prod = prod_country.upper() if prod_country else "XX"
+    dest = dest_country.upper() if dest_country else "XX"
+
+    for parties in _FTA_PARTIES.values():
+        if prod in parties and dest in parties:
+            return item in parties
+
+    # No matching FTA — treat same-country inputs as originating
+    return True if item == prod else None
+
+
 _AI_AGENTS = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "ai-agents")
 )
@@ -190,6 +230,9 @@ async def determine_origin(
         b = await db.execute(select(BOMItem).where(BOMItem.product_id == product.id))
         bom_rows = b.scalars().all()
 
+    prod_country = shipment.origin_country or "XX"
+    dest_country = shipment.destination_country or "XX"
+
     bom_dicts = [
         {
             "description": b.description or "",
@@ -198,26 +241,33 @@ async def determine_origin(
             "unit_cost": float(b.unit_cost or 0),
             "quantity": float(b.quantity or 0),
             "currency": b.currency or "USD",
+            "is_originating": _infer_is_originating(b.origin_country, prod_country, dest_country),
         }
         for b in bom_rows
     ]
 
-    # Derive product HS code: prefer explicit, fall back to highest-cost BOM item
+    # Derive product HS code: prefer explicit product field.
+    # Do NOT fall back to highest-cost BOM item — that's a component HS, not the
+    # finished-good HS. Prompt AI to classify based on product name instead.
     effective_hs = (product.hs_code or "").strip() if product else ""
     if not effective_hs:
-        classified = [(b.hs_code, float(b.unit_cost or 0) * float(b.quantity or 0))
-                      for b in bom_rows if b.hs_code]
-        if classified:
-            effective_hs = max(classified, key=lambda x: x[1])[0]
-        else:
-            effective_hs = "0000"
+        effective_hs = "0000"
+
+    # Default transaction value: if shipment has no value, approximate from BOM total × 1.5
+    # (manufacturer markup). Engine needs a non-zero value for RVC calculation.
+    tx_value = float(shipment.shipment_value_usd or 0)
+    if tx_value <= 0:
+        bom_total = sum(
+            float(b.unit_cost or 0) * float(b.quantity or 0) for b in bom_rows
+        )
+        tx_value = round(bom_total * 1.5, 2) if bom_total > 0 else 100.0
 
     ship_input_dict = {
         "hs_code": effective_hs,
         "product_description": (product.name or "Unknown product") if product else "Unknown product",
-        "production_country": shipment.origin_country or "XX",
-        "destination_country": shipment.destination_country or "XX",
-        "transaction_value_usd": float(shipment.shipment_value_usd or 0),
+        "production_country": prod_country,
+        "destination_country": dest_country,
+        "transaction_value_usd": tx_value,
         "bom": bom_dicts,
         "agreement_codes": payload.agreement_codes or [],
     }

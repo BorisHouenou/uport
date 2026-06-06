@@ -29,6 +29,7 @@ export function BOMUploadPanel() {
   const [showNewProduct, setShowNewProduct] = useState(false);
   const [newProductName, setNewProductName] = useState("");
   const [newProductOrigin, setNewProductOrigin] = useState("CA");
+  const [newProductHS, setNewProductHS] = useState("");
 
   // Origin check state
   const [showOriginDialog, setShowOriginDialog] = useState(false);
@@ -47,6 +48,7 @@ export function BOMUploadPanel() {
       const p = await createProduct.mutateAsync({
         name: newProductName.trim(),
         origin_country: newProductOrigin,
+        hs_code: newProductHS.trim() || undefined,
       });
       setProductId(p.id);
       setShowNewProduct(false);
@@ -121,11 +123,18 @@ export function BOMUploadPanel() {
               <p className="text-xs font-medium text-slate-600">New product</p>
               <input
                 type="text"
-                placeholder="Product name (e.g. Laptop 14'')"
+                placeholder="Product name (e.g. Automotive Wiring Harness)"
                 value={newProductName}
                 onChange={e => setNewProductName(e.target.value)}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 autoFocus
+              />
+              <input
+                type="text"
+                placeholder="HS code of finished good (e.g. 8544) — required for origin check"
+                value={newProductHS}
+                onChange={e => setNewProductHS(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
               <div className="flex items-center gap-2">
                 <select
