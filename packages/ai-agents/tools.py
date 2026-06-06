@@ -13,7 +13,69 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
+import threading
 from typing import Any
+
+# ─── Roo-engine class loader ───────────────────────────────────────────────────
+# tools.py is imported by both the standalone agent process AND directly from
+# the FastAPI process (since we bypassed the agent).  In the API process,
+# sys.modules["models"] is already the SQLAlchemy models package, so the bare
+# `from models import ...` inside roo-engine files resolves to the wrong module.
+#
+# Fix: load roo-engine modules once under a lock, temporarily clearing the
+# conflicting sys.modules entries, then restore them.  After the load the class
+# objects live in memory and work independently of sys.modules.
+
+_ROO_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "roo-engine"))
+_ROO_LOCK = threading.Lock()
+_ROO_CLASSES: dict | None = None
+_ROO_CONFLICT_NAMES = ["models", "engine", "rvc", "tariff_shift", "wholly_obtained", "confidence"]
+
+
+def _get_roo_classes() -> dict:
+    """
+    Return a dict of roo-engine classes, loading them exactly once.
+    Safe to call from multiple threads; uses double-checked locking.
+    """
+    global _ROO_CLASSES
+    if _ROO_CLASSES is not None:
+        return _ROO_CLASSES
+
+    with _ROO_LOCK:
+        if _ROO_CLASSES is not None:
+            return _ROO_CLASSES
+
+        if _ROO_DIR not in sys.path:
+            sys.path.insert(0, _ROO_DIR)
+
+        # Snapshot sys.modules so we can clean up everything roo-engine loads.
+        pre_keys = set(sys.modules.keys())
+
+        # Save and remove the names roo-engine uses internally (avoids API-models clash).
+        saved = {n: sys.modules.pop(n, None) for n in _ROO_CONFLICT_NAMES}
+
+        try:
+            import models as _roo_models   # noqa: PLC0415
+            import engine as _roo_engine   # noqa: PLC0415
+
+            _ROO_CLASSES = {
+                "RooEngine":   _roo_engine.RooEngine,
+                "BOMLine":     _roo_models.BOMLine,
+                "ProductInfo": _roo_models.ProductInfo,
+                "RooRule":     _roo_models.RooRule,
+                "RuleType":    _roo_models.RuleType,
+            }
+        finally:
+            # Remove any new entries roo-engine added under plain names.
+            for key in set(sys.modules.keys()) - pre_keys:
+                sys.modules.pop(key, None)
+            # Restore the API's original modules.
+            for name, mod in saved.items():
+                if mod is not None:
+                    sys.modules[name] = mod
+
+        return _ROO_CLASSES
 
 
 # ─── Bootstrap data (dev fallback) ────────────────────────────────────────────
@@ -494,13 +556,13 @@ def run_roo_engine(
         {agreements_evaluated, determinations, best_agreement, best_saving_usd,
          needs_human_review, review_reasons, confidence_summary}
     """
-    import sys
-    import os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "roo-engine"))
-
     try:
-        from engine import RooEngine
-        from models import BOMLine, ProductInfo, RooRule, RuleType
+        _roo = _get_roo_classes()
+        RooEngine   = _roo["RooEngine"]
+        BOMLine     = _roo["BOMLine"]
+        ProductInfo = _roo["ProductInfo"]
+        RooRule     = _roo["RooRule"]
+        RuleType    = _roo["RuleType"]
 
         # Resolve agreements
         if agreement_codes:
