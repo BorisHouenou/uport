@@ -122,9 +122,19 @@ def _make_user_message(shipment: ShipmentInput) -> str:
     if len(shipment.bom) > 10:
         bom_text += f"\n  ... and {len(shipment.bom) - 10} more items"
 
+    hs_note = ""
+    if not shipment.hs_code or shipment.hs_code in ("0000", "0000.00"):
+        hs_note = (
+            "\n\nIMPORTANT: The HS code for this finished good has not been set (shown as 0000). "
+            "You MUST call search_tariff_schedule using the product name to identify the correct "
+            "HS code for the FINISHED GOOD before calling get_roo_rules or run_roo_engine. "
+            "The BOM items listed are COMPONENTS/INPUTS — their HS codes are NOT the finished-good HS. "
+            "The finished-good HS is the tariff classification of the assembled product itself."
+        )
+
     return f"""Determine Rules of Origin compliance for this shipment:
 
-Product: {shipment.product_description} (HS {shipment.hs_code})
+Product: {shipment.product_description} (HS {shipment.hs_code}){hs_note}
 Production country: {shipment.production_country}
 Destination: {shipment.destination_country}
 Transaction value: USD {shipment.transaction_value_usd:,.2f}
@@ -132,7 +142,7 @@ Net cost: {f'USD {shipment.net_cost_usd:,.2f}' if shipment.net_cost_usd else 'no
 Wholly obtained category: {shipment.wholly_obtained_category or 'N/A'}
 FTAs to evaluate: {', '.join(shipment.agreement_codes) if shipment.agreement_codes else 'auto-detect'}
 
-BOM ({len(shipment.bom)} items):
+BOM ({len(shipment.bom)} items — these are INPUT COMPONENTS, not the finished good):
 {bom_text or '  (no BOM provided)'}
 
 Use the available tools to run the complete origin determination and return the structured JSON result."""

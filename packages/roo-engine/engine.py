@@ -220,16 +220,35 @@ class RooEngine:
         )
 
     def _eval_combined(self, product: ProductInfo, rule: RooRule, agreement_code: str) -> AgreementDetermination:
-        """Evaluate a combined rule (Tariff Shift AND RVC must both pass)."""
-        ts_det = self._eval_tariff_shift(product, rule, agreement_code)
-        rvc_det = self._eval_rvc(product, rule, agreement_code) if rule.secondary_rule else None
+        """
+        Evaluate a combined rule: TS OR RVC.
 
-        both_pass = (
-            ts_det.result == DeterminationResult.PASS
-            and (rvc_det is None or rvc_det.result == DeterminationResult.PASS)
+        CUSMA/CETA combined rules mean the exporter may satisfy EITHER the
+        tariff-shift requirement OR the RVC threshold — not both. If TS passes,
+        RVC is not needed. We only require RVC when TS fails, and only when a
+        threshold is actually specified in the rule.
+        """
+        ts_det = self._eval_tariff_shift(product, rule, agreement_code)
+
+        rvc_det = None
+        if ts_det.result != DeterminationResult.PASS and rule.value_threshold is not None:
+            # TS failed or was inconclusive — try RVC as the alternative path
+            try:
+                rvc_det = self._eval_rvc(product, rule, agreement_code)
+            except Exception:
+                pass
+
+        # OR logic: either path qualifies
+        either_passes = ts_det.result == DeterminationResult.PASS or (
+            rvc_det is not None and rvc_det.result == DeterminationResult.PASS
         )
-        confidence = min(ts_det.confidence, rvc_det.confidence if rvc_det else 1.0)
-        reasoning = f"Combined rule:\n  TS: {ts_det.reasoning}"
+
+        # Best confidence from whichever path ran
+        confidence = ts_det.confidence
+        if rvc_det is not None:
+            confidence = max(confidence, rvc_det.confidence)
+
+        reasoning = f"Combined rule (TS or RVC):\n  TS: {ts_det.reasoning}"
         if rvc_det:
             reasoning += f"\n  RVC: {rvc_det.reasoning}"
 
@@ -237,7 +256,7 @@ class RooEngine:
             agreement_code=agreement_code,
             rule_applied=RuleType.COMBINED,
             rule_text=rule.rule_text,
-            result=DeterminationResult.PASS if both_pass else DeterminationResult.FAIL,
+            result=DeterminationResult.PASS if either_passes else DeterminationResult.FAIL,
             confidence=confidence,
             reasoning=reasoning,
             ts_result=ts_det.ts_result,

@@ -519,6 +519,40 @@ def run_roo_engine(
                 "error": None,
             }
 
+        # Determine FTA party sets so BOMLine.is_originating can be derived
+        # from origin_country when the caller hasn't pre-computed it.
+        _FTA_PARTIES_LOCAL: dict[str, frozenset[str]] = {
+            "cusma":  frozenset({"CA", "US", "MX"}),
+            "ceta":   frozenset({"CA", "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE",
+                                  "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT",
+                                  "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"}),
+            "cptpp":  frozenset({"AU", "BN", "CA", "CL", "JP", "MX", "MY", "NZ", "PE", "SG", "VN"}),
+            "afcfta": frozenset({"DZ", "AO", "BJ", "BW", "BF", "BI", "CM", "CV", "CF", "TD",
+                                  "KM", "CG", "CD", "CI", "DJ", "EG", "GQ", "ER", "SZ", "ET",
+                                  "GA", "GM", "GH", "GN", "GW", "KE", "LS", "LR", "LY", "MG",
+                                  "MW", "ML", "MR", "MU", "MA", "MZ", "NA", "NE", "NG", "RW",
+                                  "ST", "SN", "SL", "SO", "ZA", "SS", "SD", "TZ", "TG", "TN",
+                                  "UG", "ZM", "ZW"}),
+        }
+
+        def _derive_is_originating(item_origin: str | None, agreements_list: list[dict]) -> bool | None:
+            if not item_origin:
+                return None
+            item = item_origin.upper()
+            prod = origin_country.upper()
+            dest = destination_country.upper()
+            for ag in agreements_list:
+                parties = _FTA_PARTIES_LOCAL.get(ag["code"].lower())
+                if parties and prod in parties and dest in parties:
+                    return item in parties
+            return True if item == prod else None
+
+        # Derive the HS prefix used for this lookup so RooRule match-level is correct.
+        _cleaned_hs = re.sub(r"[.\s]", "", hs_code)
+        _hs_heading_str = _cleaned_hs[:4] if len(_cleaned_hs) >= 4 else None
+        _hs_chapter_str = _cleaned_hs[:2] if len(_cleaned_hs) >= 2 else None
+        _hs_subheading_str = _cleaned_hs[:6] if len(_cleaned_hs) >= 6 else None
+
         # Build RooRule lists per agreement
         rules_by_agreement: dict[str, list] = {}
         for ag in agreements:
@@ -530,9 +564,9 @@ def run_roo_engine(
                     try:
                         rule = RooRule(
                             agreement_code=code,
-                            hs_chapter=None,
-                            hs_heading=None,
-                            hs_subheading=None,
+                            hs_chapter=_hs_chapter_str,
+                            hs_heading=_hs_heading_str,
+                            hs_subheading=_hs_subheading_str,
                             rule_type=RuleType(r["rule_type"]),
                             rule_text=r.get("rule_text", ""),
                             value_threshold=r.get("value_threshold"),
@@ -557,9 +591,12 @@ def run_roo_engine(
                 "error": None,
             }
 
-        # Build product model
+        # Build product model; derive is_originating from origin_country when not provided.
         bom_lines = []
         for b in bom_items:
+            is_orig = b.get("is_originating")
+            if is_orig is None:
+                is_orig = _derive_is_originating(b.get("origin_country"), agreements)
             bom_lines.append(BOMLine(
                 description=b.get("description", ""),
                 hs_code=b.get("hs_code"),
@@ -568,7 +605,7 @@ def run_roo_engine(
                 unit_cost=float(b.get("unit_cost", 0)),
                 currency=b.get("currency", "USD"),
                 unit_cost_usd=b.get("unit_cost_usd"),
-                is_originating=b.get("is_originating"),
+                is_originating=is_orig,
             ))
 
         product = ProductInfo(
