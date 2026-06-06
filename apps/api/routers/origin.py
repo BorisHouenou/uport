@@ -95,29 +95,28 @@ async def determine_origin(
 
     bom_dicts = [
         {
-            "description": b.description,
+            "description": b.description or "",
             "hs_code": b.hs_code,
             "origin_country": b.origin_country,
-            "unit_cost": float(b.unit_cost),
-            "quantity": float(b.quantity),
-            "currency": b.currency,
+            "unit_cost": float(b.unit_cost or 0),
+            "quantity": float(b.quantity or 0),
+            "currency": b.currency or "USD",
             "is_originating": b.is_originating,
         }
         for b in bom_rows
     ]
 
-    ship_input = ShipmentInput(
-        hs_code=product.hs_code if product else "0000",
-        product_description=product.name if product else "Unknown product",
-        production_country=shipment.origin_country,
-        destination_country=shipment.destination_country,
-        transaction_value_usd=float(shipment.shipment_value_usd or 0),
-        bom=bom_dicts,
-        agreement_codes=payload.agreement_codes or [],
-    )
-
     try:
         import asyncio
+        ship_input = ShipmentInput(
+            hs_code=(product.hs_code or "0000") if product else "0000",
+            product_description=(product.name or "Unknown product") if product else "Unknown product",
+            production_country=shipment.origin_country or "XX",
+            destination_country=shipment.destination_country or "XX",
+            transaction_value_usd=float(shipment.shipment_value_usd or 0),
+            bom=bom_dicts,
+            agreement_codes=payload.agreement_codes or [],
+        )
         engine_result = await asyncio.to_thread(run_origin_determination, ship_input)
     except Exception as exc:
         logger.exception("Origin determination engine failed for shipment %s", shipment_id)
