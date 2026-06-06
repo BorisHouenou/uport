@@ -117,7 +117,8 @@ async def determine_origin(
     )
 
     try:
-        engine_result = run_origin_determination(ship_input)
+        import asyncio
+        engine_result = await asyncio.to_thread(run_origin_determination, ship_input)
     except Exception as exc:
         logger.exception("Origin determination engine failed for shipment %s", shipment_id)
         raise HTTPException(

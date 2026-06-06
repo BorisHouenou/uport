@@ -102,8 +102,10 @@ async def _upload_bom_inner(
     unclassified = [(i, r) for i, r in enumerate(rows) if not r.hs_code and r.description]
     if unclassified:
         try:
+            import asyncio
             from hs_classifier import classify_batch
-            batch_results = classify_batch([{"description": r.description} for _, r in unclassified])
+            batch_input = [{"description": r.description} for _, r in unclassified]
+            batch_results = await asyncio.to_thread(classify_batch, batch_input)
             for (row_idx, _), result in zip(unclassified, batch_results):
                 if result.confidence >= 0.5:
                     rows[row_idx].hs_code = result.hs_code
