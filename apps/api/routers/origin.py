@@ -100,20 +100,75 @@ class CorrectionCreate(BaseModel):
     reviewer_notes: str | None = None
 
 
+def _engine_summary(dets: list[dict], review_reasons: list[str]) -> str:
+    """Plain-English summary from engine output — no LLM needed."""
+    passing = [d for d in dets if d.get("result") == "pass"]
+    if passing:
+        codes = ", ".join(d["agreement_code"].upper() for d in passing)
+        best = passing[0]
+        rule = (best.get("rule_text") or best.get("rule_applied") or "").split(";")[0].strip()
+        return (
+            f"Product qualifies for preferential origin under {codes}. "
+            f"Rule satisfied: {rule}."
+        )
+    failing = [d for d in dets if d.get("result") == "fail"]
+    if failing:
+        reasons = "; ".join(
+            f"{d['agreement_code'].upper()}: {d.get('reasoning', 'rule not met')[:120]}"
+            for d in failing[:2]
+        )
+        return f"Product does not qualify under any evaluated agreement. {reasons}"
+    if review_reasons:
+        return "Determination requires human review. " + review_reasons[0]
+    return "No applicable trade agreement found for this country pair."
+
+
 async def _run_determination_bg(
     stub_id: uuid.UUID,
     shipment_id: uuid.UUID,
     ship_input_dict: dict,
     shipment_value_usd: float,
 ) -> None:
-    """Background task: run origin agent, replace stub with real results."""
-    from origin_agent import ShipmentInput, run_origin_determination
+    """
+    Background task: run the deterministic RoO engine and write results.
+
+    Calls run_roo_engine() from tools.py directly — no Claude agent loop,
+    no JSON parsing, no MAX_TOOL_ROUNDS failures. The engine handles
+    agreement lookup, rule matching, RVC/TS calculations, and confidence.
+    """
+    from tools import run_roo_engine, search_tariff_schedule
+
+    hs_code = ship_input_dict.get("hs_code", "")
+    prod_country = ship_input_dict.get("production_country", "XX")
+    dest_country = ship_input_dict.get("destination_country", "XX")
+    bom_items = ship_input_dict.get("bom", [])
+    tx_value = float(ship_input_dict.get("transaction_value_usd") or 0)
+    product_desc = ship_input_dict.get("product_description", "")
+    agreement_codes = ship_input_dict.get("agreement_codes") or []
+
+    # Resolve HS code: if unknown, classify from product name
+    if not hs_code or hs_code in ("0000", "0000.00"):
+        try:
+            hits = await asyncio.to_thread(search_tariff_schedule, product_desc, 1)
+            if hits:
+                hs_code = hits[0]["hs_code"]
+                logger.info("Resolved HS for '%s' → %s", product_desc, hs_code)
+        except Exception as exc:
+            logger.warning("HS auto-resolve failed for '%s': %s", product_desc, exc)
 
     try:
-        ship_input = ShipmentInput(**ship_input_dict)
-        engine_result = await asyncio.to_thread(run_origin_determination, ship_input)
+        raw = await asyncio.to_thread(
+            run_roo_engine,
+            hs_code=hs_code or "0000",
+            origin_country=prod_country,
+            destination_country=dest_country,
+            transaction_value_usd=tx_value,
+            bom_items=bom_items,
+            agreement_codes=agreement_codes,
+            product_description=product_desc,
+        )
     except Exception as exc:
-        logger.exception("Origin determination engine failed for shipment %s", shipment_id)
+        logger.exception("RoO engine failed for shipment %s", shipment_id)
         async with AsyncSessionLocal() as db:
             await db.execute(
                 OriginDetermination.__table__.update()
@@ -123,12 +178,19 @@ async def _run_determination_bg(
             await db.commit()
         return
 
-    async with AsyncSessionLocal() as db:
-        dets = engine_result.determinations
-        final_status = "completed" if not engine_result.needs_human_review else "needs_review"
+    dets: list[dict] = raw.get("determinations", [])
+    review_reasons: list[str] = raw.get("review_reasons", [])
+    needs_review = raw.get("needs_human_review", False)
+    summary = _engine_summary(dets, review_reasons)
+    final_status = "needs_review" if needs_review else "completed"
 
+    logger.info(
+        "RoO engine result for shipment %s: %d determinations, best=%s",
+        shipment_id, len(dets), raw.get("best_agreement"),
+    )
+
+    async with AsyncSessionLocal() as db:
         if not dets:
-            # No FTA found — reuse stub_id, update it in place
             await db.execute(
                 OriginDetermination.__table__.update()
                 .where(OriginDetermination.id == stub_id)
@@ -136,16 +198,14 @@ async def _run_determination_bg(
                     agreement_code="none",
                     agreement_name="No applicable agreement",
                     rule_applied="tariff_shift",
-                    rule_text="; ".join(engine_result.review_reasons),
+                    rule_text="; ".join(review_reasons),
                     result="fail",
                     confidence=0.0,
-                    reasoning=engine_result.llm_summary or "No applicable FTA found.",
+                    reasoning=summary,
                     status="needs_review",
                 )
             )
         else:
-            # Update the stub in place with the first agreement result
-            # so the frontend can still find it by stub_id
             first = dets[0]
             code0 = first.get("agreement_code", "")
             passing0 = first.get("result") == "pass"
@@ -160,13 +220,12 @@ async def _run_determination_bg(
                     rule_text=first.get("rule_text", ""),
                     result=first.get("result") or "fail",
                     confidence=float(first.get("confidence") or 0.0),
-                    reasoning=first.get("reasoning", ""),
+                    reasoning=first.get("reasoning", summary),
                     preferential_rate="0%" if passing0 else None,
-                    savings_per_unit=saving0,
+                    savings_per_unit=float(saving0 or 0),
                     status=final_status,
                 )
             )
-            # Append remaining agreements as new rows
             for det_dict in dets[1:]:
                 code = det_dict.get("agreement_code", "")
                 passing = det_dict.get("result") == "pass"
@@ -182,12 +241,12 @@ async def _run_determination_bg(
                     confidence=float(det_dict.get("confidence") or 0.0),
                     reasoning=det_dict.get("reasoning", ""),
                     preferential_rate="0%" if passing else None,
-                    savings_per_unit=saving,
+                    savings_per_unit=float(saving or 0),
                     status=final_status,
                 ))
 
         await db.commit()
-    logger.info("Origin determination complete for shipment %s", shipment_id)
+    logger.info("Origin determination written for shipment %s", shipment_id)
 
 
 @router.post("/determine", response_model=OriginDeterminationResponse, status_code=201)
