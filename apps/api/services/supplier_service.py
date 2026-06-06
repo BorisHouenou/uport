@@ -10,7 +10,7 @@ from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import settings
+from core.config import get_settings
 from models.supplier import SupplierDeclaration
 from schemas.suppliers import (
     SupplierDeclarationCreate,
@@ -91,7 +91,8 @@ async def attach_document(
     content = await file.read()
     s3_key = f"supplier-docs/{org_id}/{declaration_id}/{file.filename}"
 
-    if settings.environment == "development":
+    _settings = get_settings()
+    if _settings.environment == "development":
         import pathlib
 
         path = pathlib.Path(f"/tmp/{s3_key}")
@@ -99,16 +100,16 @@ async def attach_document(
         path.write_bytes(content)
         doc_url = f"file://{path}"
     else:
-        s3 = boto3.client("s3", region_name=settings.aws_region)
+        s3 = boto3.client("s3", region_name=_settings.aws_region)
         s3.put_object(
-            Bucket=settings.s3_bucket,
+            Bucket=_settings.s3_bucket_documents,
             Key=s3_key,
             Body=content,
             ContentType=file.content_type or "application/octet-stream",
         )
         doc_url = s3.generate_presigned_url(
             "get_object",
-            Params={"Bucket": settings.s3_bucket, "Key": s3_key},
+            Params={"Bucket": _settings.s3_bucket_documents, "Key": s3_key},
             ExpiresIn=86400,
         )
 

@@ -18,7 +18,7 @@ export default function SignInPage() {
             AI-powered trade<br />compliance.
           </h2>
           <p className="mt-4 text-[#94a3b8] text-base leading-relaxed max-w-sm">
-            Automate Rules of Origin across CUSMA, CETA, CPTPP, and 170+ trade agreements. Reclaim every preferential tariff you've earned.
+            Automate Rules of Origin across CUSMA, CETA, CPTPP, and 170+ trade agreements. Reclaim every preferential tariff you&apos;ve earned.
           </p>
           <ul className="mt-8 space-y-3">
             {[

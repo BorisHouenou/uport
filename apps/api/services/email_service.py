@@ -49,8 +49,8 @@ def supplier_expiry_reminder_html(
     valid_until: str,
     days_remaining: int,
     dashboard_url: str,
-) -> tuple[str, str]:
-    """Return (html, plain_text) for a supplier declaration expiry reminder."""
+) -> tuple[str, str, str]:
+    """Return (subject, html, plain_text) for a supplier declaration expiry reminder."""
     urgency = (
         "URGENT: "
         if days_remaining <= 1
