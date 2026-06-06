@@ -84,48 +84,67 @@ async def _run_determination_bg(
         return
 
     async with AsyncSessionLocal() as db:
-        # Delete the stub
-        await db.execute(
-            delete(OriginDetermination).where(OriginDetermination.id == stub_id)
-        )
+        dets = engine_result.determinations
+        final_status = "completed" if not engine_result.needs_human_review else "needs_review"
 
-        determinations = []
-        for det_dict in engine_result.determinations:
-            code = det_dict.get("agreement_code", "")
-            passing = det_dict.get("result") == "pass"
-            saving = det_dict.get("savings_per_unit") or (
-                shipment_value_usd * 0.065 if passing else 0
+        if not dets:
+            # No FTA found — reuse stub_id, update it in place
+            await db.execute(
+                OriginDetermination.__table__.update()
+                .where(OriginDetermination.id == stub_id)
+                .values(
+                    agreement_code="none",
+                    agreement_name="No applicable agreement",
+                    rule_applied="tariff_shift",
+                    rule_text="; ".join(engine_result.review_reasons),
+                    result="fail",
+                    confidence=0.0,
+                    reasoning=engine_result.llm_summary or "No applicable FTA found.",
+                    status="needs_review",
+                )
             )
-            det = OriginDetermination(
-                id=uuid.uuid4(),
-                shipment_id=shipment_id,
-                agreement_code=code,
-                agreement_name=_AGREEMENT_NAMES.get(code, code.upper()),
-                rule_applied=det_dict.get("rule_applied") or "tariff_shift",
-                rule_text=det_dict.get("rule_text", ""),
-                result=det_dict.get("result") or "fail",
-                confidence=float(det_dict.get("confidence") or 0.0),
-                reasoning=det_dict.get("reasoning", ""),
-                preferential_rate="0%" if passing else None,
-                savings_per_unit=saving,
-                status="completed" if not engine_result.needs_human_review else "needs_review",
+        else:
+            # Update the stub in place with the first agreement result
+            # so the frontend can still find it by stub_id
+            first = dets[0]
+            code0 = first.get("agreement_code", "")
+            passing0 = first.get("result") == "pass"
+            saving0 = first.get("savings_per_unit") or (shipment_value_usd * 0.065 if passing0 else 0)
+            await db.execute(
+                OriginDetermination.__table__.update()
+                .where(OriginDetermination.id == stub_id)
+                .values(
+                    agreement_code=code0,
+                    agreement_name=_AGREEMENT_NAMES.get(code0, code0.upper()),
+                    rule_applied=first.get("rule_applied") or "tariff_shift",
+                    rule_text=first.get("rule_text", ""),
+                    result=first.get("result") or "fail",
+                    confidence=float(first.get("confidence") or 0.0),
+                    reasoning=first.get("reasoning", ""),
+                    preferential_rate="0%" if passing0 else None,
+                    savings_per_unit=saving0,
+                    status=final_status,
+                )
             )
-            db.add(det)
-            determinations.append(det)
-
-        if not determinations:
-            db.add(OriginDetermination(
-                id=uuid.uuid4(),
-                shipment_id=shipment_id,
-                agreement_code="none",
-                agreement_name="No applicable agreement",
-                rule_applied="tariff_shift",
-                rule_text="; ".join(engine_result.review_reasons),
-                result="fail",
-                confidence=0.0,
-                reasoning=engine_result.llm_summary or "No applicable FTA found.",
-                status="needs_review",
-            ))
+            # Append remaining agreements as new rows
+            for det_dict in dets[1:]:
+                code = det_dict.get("agreement_code", "")
+                passing = det_dict.get("result") == "pass"
+                saving = det_dict.get("savings_per_unit") or (shipment_value_usd * 0.065 if passing else 0)
+                db.add(OriginDetermination(
+                    id=uuid.uuid4(),
+                    shipment_id=shipment_id,
+                    agreement_code=code,
+                    agreement_name=_AGREEMENT_NAMES.get(code, code.upper()),
+                    rule_applied=det_dict.get("rule_applied") or "tariff_shift",
+                    rule_text=det_dict.get("rule_text", ""),
+                    result=det_dict.get("result") or "fail",
+                    confidence=float(det_dict.get("confidence") or 0.0),
+                    reasoning=det_dict.get("reasoning", ""),
+                    preferential_rate="0%" if passing else None,
+                    savings_per_unit=saving,
+                    status=final_status,
+                ))
 
         await db.commit()
     logger.info("Origin determination complete for shipment %s", shipment_id)
