@@ -39,6 +39,7 @@ async def _classify_and_update(product_id: uuid.UUID, item_ids: list[uuid.UUID],
         return
 
     async with AsyncSessionLocal() as db:
+        classified_ids: set[uuid.UUID] = set()
         for item_id, result in zip(item_ids, results):
             if result.confidence >= 0.5 and result.hs_code and result.hs_code != "0000.00":
                 await db.execute(
@@ -50,8 +51,18 @@ async def _classify_and_update(product_id: uuid.UUID, item_ids: list[uuid.UUID],
                         classified_by="ai",
                     )
                 )
+                classified_ids.add(item_id)
+        # Mark items that couldn't be classified as "manual" so the frontend
+        # knows the AI attempt is complete (not just still pending).
+        for item_id in item_ids:
+            if item_id not in classified_ids:
+                await db.execute(
+                    update(BOMItem)
+                    .where(BOMItem.id == item_id)
+                    .values(classified_by="manual")
+                )
         await db.commit()
-    logger.info("HS classification complete for product %s: %d items", product_id, len(item_ids))
+    logger.info("HS classification complete for product %s: %d/%d classified", product_id, len(classified_ids), len(item_ids))
 
 
 @router.post("/upload", response_model=BOMUploadResponse, status_code=201)

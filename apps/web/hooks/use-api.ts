@@ -62,8 +62,12 @@ export function useBOMItems(productId: string | null) {
     refetchInterval: (query) => {
       const items = (query.state.data as any)?.items;
       if (!items || items.length === 0) return false;
-      const allClassified = items.every((i: any) => i.hs_code);
-      return allClassified ? false : 3000;
+      // Poll only while items still have classified_by="ai" with no hs_code
+      // (i.e., the background task hasn't finished yet).
+      // Items that can't be classified (labor, services) get classified_by="manual"
+      // after the AI attempt, which stops the poll without requiring hs_code.
+      const aiPending = items.some((i: any) => !i.hs_code && i.classified_by === "ai");
+      return aiPending ? 3000 : false;
     },
   });
 }
