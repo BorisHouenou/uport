@@ -101,7 +101,6 @@ async def determine_origin(
             "unit_cost": float(b.unit_cost or 0),
             "quantity": float(b.quantity or 0),
             "currency": b.currency or "USD",
-            "is_originating": b.is_originating,
         }
         for b in bom_rows
     ]
