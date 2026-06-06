@@ -1,4 +1,5 @@
 """Bill of Materials upload and management endpoints."""
+
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -26,6 +27,7 @@ async def upload_bom(
     Triggers async parsing and HS code classification per line item.
     """
     import os
+
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -39,13 +41,16 @@ async def upload_bom(
             detail=f"File exceeds {MAX_FILE_SIZE_MB}MB limit",
         )
     from services.tasks.bom_tasks import process_bom_upload
+
     task = process_bom_upload.delay(
         org_id=current_user["org_id"],
         product_id=str(product_id),
         file_content=content.hex(),
         file_ext=ext,
     )
-    return BOMUploadResponse(task_id=task.id, status="processing", product_id=product_id)
+    return BOMUploadResponse(
+        task_id=task.id, status="processing", product_id=product_id
+    )
 
 
 @router.get("/{product_id}/items", response_model=BOMItemList)
@@ -56,4 +61,5 @@ async def get_bom_items(
 ):
     """Return all BOM line items for a product with their classified HS codes."""
     from services.bom_service import get_bom_items
+
     return await get_bom_items(db, product_id, current_user["org_id"])

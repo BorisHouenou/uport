@@ -16,14 +16,21 @@ if TYPE_CHECKING:
 class Certificate(Base, TimestampMixin):
     __tablename__ = "certificates"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     shipment_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("shipments.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("shipments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     determination_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("origin_determinations.id", ondelete="SET NULL")
     )
-    cert_type: Mapped[str] = mapped_column(String(32), nullable=False)  # cusma, eur1, form_a, generic
+    cert_type: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )  # cusma, eur1, form_a, generic
     pdf_url: Mapped[str | None] = mapped_column(Text)
     s3_key: Mapped[str | None] = mapped_column(Text)
     issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -33,4 +40,6 @@ class Certificate(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(32), default="draft", nullable=False)
     exporter_ref: Mapped[str | None] = mapped_column(String(128))
 
-    shipment: Mapped["Shipment"] = relationship("Shipment", back_populates="certificates")
+    shipment: Mapped["Shipment"] = relationship(
+        "Shipment", back_populates="certificates"
+    )

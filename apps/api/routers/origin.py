@@ -1,4 +1,5 @@
 """Origin determination endpoints."""
+
 import uuid
 from typing import Annotated
 
@@ -50,7 +51,9 @@ async def determine_origin(
 
     # Verify the shipment exists and belongs to this org
     if not org_id:
-        raise HTTPException(status_code=403, detail="No organization associated with this account")
+        raise HTTPException(
+            status_code=403, detail="No organization associated with this account"
+        )
     ship_result = await db.execute(
         select(Shipment).where(
             Shipment.id == shipment_id,
@@ -77,7 +80,13 @@ async def determine_origin(
     # ── Run the real origin determination engine ──────────────────────────────
     import sys as _sys
     import os as _os
-    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "..", "packages", "ai-agents"))
+
+    _sys.path.insert(
+        0,
+        _os.path.join(
+            _os.path.dirname(__file__), "..", "..", "..", "packages", "ai-agents"
+        ),
+    )
 
     from origin_agent import ShipmentInput, run_origin_determination
 
@@ -139,7 +148,9 @@ async def determine_origin(
             preferential_rate="0%" if passing else None,
             mfn_rate=None,
             savings_per_unit=saving,
-            status="completed" if not engine_result.needs_human_review else "needs_review",
+            status="completed"
+            if not engine_result.needs_human_review
+            else "needs_review",
         )
         db.add(det)
         determinations.append(det)
@@ -164,7 +175,9 @@ async def determine_origin(
     await db.commit()
 
     best = next((d for d in determinations if d.result == "pass"), None)
-    total_savings = sum(float(d.savings_per_unit or 0) for d in determinations if d.result == "pass")
+    total_savings = sum(
+        float(d.savings_per_unit or 0) for d in determinations if d.result == "pass"
+    )
 
     return OriginDeterminationResponse(
         task_id=str(determinations[0].id),
@@ -207,16 +220,21 @@ async def get_review_queue(
         .join(Shipment, OriginDetermination.shipment_id == Shipment.id)
         .where(Shipment.org_id == org_id)
         .where(
-            (OriginDetermination.confidence < CONFIDENCE_REVIEW_THRESHOLD) |
-            (OriginDetermination.status == "needs_review")
+            (OriginDetermination.confidence < CONFIDENCE_REVIEW_THRESHOLD)
+            | (OriginDetermination.status == "needs_review")
         )
         .where(OriginDetermination.status != "reviewed")
         .order_by(OriginDetermination.confidence.asc())  # lowest confidence first
     )
     from sqlalchemy import func
+
     total_q = select(func.count()).select_from(q.subquery())
     total = (await db.execute(total_q)).scalar_one()
-    rows = (await db.execute(q.offset((page - 1) * page_size).limit(page_size))).scalars().all()
+    rows = (
+        (await db.execute(q.offset((page - 1) * page_size).limit(page_size)))
+        .scalars()
+        .all()
+    )
 
     return {
         "total": total,
@@ -238,7 +256,9 @@ async def submit_review(
     Approved: confirms the AI result. Rejected: overrides the result.
     """
     if payload.decision not in ("approved", "rejected"):
-        raise HTTPException(status_code=422, detail="decision must be 'approved' or 'rejected'")
+        raise HTTPException(
+            status_code=422, detail="decision must be 'approved' or 'rejected'"
+        )
 
     org_id = current_user["org_id"]
     result = await db.execute(
@@ -256,7 +276,9 @@ async def submit_review(
     if payload.decision == "rejected" and payload.corrected_result:
         det.result = payload.corrected_result
     if payload.reviewer_notes:
-        det.reasoning = (det.reasoning or "") + f"\n\n[Review note — {det.reviewed_by}]: {payload.reviewer_notes}"
+        det.reasoning = (
+            det.reasoning or ""
+        ) + f"\n\n[Review note — {det.reviewed_by}]: {payload.reviewer_notes}"
 
     await db.commit()
     return {"id": str(det.id), "status": det.status, "result": det.result}
@@ -280,13 +302,17 @@ async def get_determination(
     )
     det = anchor.scalar_one_or_none()
     if not det:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Determination not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Determination not found"
+        )
 
     # Fetch ALL determinations for this shipment, deduplicated to latest per agreement
     all_dets_result = await db.execute(
         select(OriginDetermination)
         .where(OriginDetermination.shipment_id == det.shipment_id)
-        .order_by(OriginDetermination.agreement_code, OriginDetermination.created_at.desc())
+        .order_by(
+            OriginDetermination.agreement_code, OriginDetermination.created_at.desc()
+        )
     )
     all_rows = all_dets_result.scalars().all()
     # Keep only the most recent determination per agreement code
@@ -298,7 +324,9 @@ async def get_determination(
             all_dets.append(d)
 
     best = next((d for d in all_dets if d.result == "pass"), None)
-    total_savings = sum(float(d.savings_per_unit or 0) for d in all_dets if d.result == "pass")
+    total_savings = sum(
+        float(d.savings_per_unit or 0) for d in all_dets if d.result == "pass"
+    )
 
     return {
         "id": str(det.id),
@@ -366,12 +394,17 @@ async def submit_correction(
         hs_chapter=payload.corrected_hs_code[:2] if payload.corrected_hs_code else None,
         origin_country=ship.origin_country if ship else None,
         destination_country=ship.destination_country if ship else None,
-        confidence_at_review=float(det.confidence) if det.confidence is not None else None,
+        confidence_at_review=float(det.confidence)
+        if det.confidence is not None
+        else None,
     )
     db.add(correction)
     await db.commit()
     await db.refresh(correction)
-    return {"correction_id": str(correction.id), "determination_id": str(determination_id)}
+    return {
+        "correction_id": str(correction.id),
+        "determination_id": str(determination_id),
+    }
 
 
 @router.get("/calibration")
@@ -387,6 +420,7 @@ async def get_calibration_stats(
     Refreshed daily by the compute_calibration_stats Celery task.
     """
     from sqlalchemy import text
+
     row = await db.execute(
         text("""
             SELECT computed_at, stats
@@ -426,14 +460,18 @@ async def get_calibration_stats(
             }
             for r in rows
         }
-        return {"computed_at": None, "agreements": stats, "total_corrections": sum(v["total_reviews"] for v in stats.values())}
+        return {
+            "computed_at": None,
+            "agreements": stats,
+            "total_corrections": sum(v["total_reviews"] for v in stats.values()),
+        }
 
     return {
         "computed_at": result[0].isoformat() if result[0] else None,
         "agreements": result[1],
-        "total_corrections": sum(
-            v.get("total_reviews", 0) for v in result[1].values()
-        ) if result[1] else 0,
+        "total_corrections": sum(v.get("total_reviews", 0) for v in result[1].values())
+        if result[1]
+        else 0,
     }
 
 

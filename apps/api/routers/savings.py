@@ -1,4 +1,5 @@
 """Savings / ROI summary endpoints."""
+
 import uuid
 
 from fastapi import APIRouter, Depends

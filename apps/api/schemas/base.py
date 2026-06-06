@@ -1,4 +1,5 @@
 """Shared Pydantic base models."""
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

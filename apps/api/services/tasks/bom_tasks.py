@@ -1,14 +1,22 @@
 """BOM processing Celery task — Sprint 3-4 implementation."""
+
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'packages', 'ai-agents'))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "..", "..", "packages", "ai-agents"
+    ),
+)
 
 from core.celery_app import celery_app
 
 
 @celery_app.task(name="bom.process_upload", bind=True, max_retries=3)
-def process_bom_upload(self, org_id: str, product_id: str, file_content: str, file_ext: str):
+def process_bom_upload(
+    self, org_id: str, product_id: str, file_content: str, file_ext: str
+):
     """
     Parse a BOM file, classify each line item's HS code, and persist to DB.
     file_content is hex-encoded bytes.
@@ -33,18 +41,22 @@ def process_bom_upload(self, org_id: str, product_id: str, file_content: str, fi
                     hs_code = result.hs_code
                     hs_confidence = result.confidence
 
-            bom_items.append({
-                "product_id": product_id,
-                "description": row.description,
-                "quantity": row.quantity,
-                "unit_cost": row.unit_cost,
-                "currency": row.currency,
-                "origin_country": row.origin_country,
-                "hs_code": hs_code,
-                "hs_confidence": hs_confidence,
-                "is_originating": row.is_originating,
-                "classified_by": "ai" if hs_confidence else ("imported" if row.hs_code else "manual"),
-            })
+            bom_items.append(
+                {
+                    "product_id": product_id,
+                    "description": row.description,
+                    "quantity": row.quantity,
+                    "unit_cost": row.unit_cost,
+                    "currency": row.currency,
+                    "origin_country": row.origin_country,
+                    "hs_code": hs_code,
+                    "hs_confidence": hs_confidence,
+                    "is_originating": row.is_originating,
+                    "classified_by": "ai"
+                    if hs_confidence
+                    else ("imported" if row.hs_code else "manual"),
+                }
+            )
 
         save_bom_items_sync(product_id, org_id, bom_items)
         return {"status": "completed", "items_processed": len(bom_items)}
@@ -74,18 +86,20 @@ def process_bom_from_rows(self, product_id: str, rows: list[dict], org_id: str):
                     hs_code = result.hs_code
                     hs_confidence = result.confidence
 
-            bom_items.append({
-                "product_id": product_id,
-                "description": row.get("description", ""),
-                "quantity": row.get("quantity", 1.0),
-                "unit_cost": row.get("unit_cost", 0.0),
-                "currency": row.get("currency", "USD"),
-                "origin_country": row.get("origin_country"),
-                "hs_code": hs_code,
-                "hs_confidence": hs_confidence,
-                "is_originating": row.get("is_originating"),
-                "classified_by": "ai" if hs_confidence else "imported",
-            })
+            bom_items.append(
+                {
+                    "product_id": product_id,
+                    "description": row.get("description", ""),
+                    "quantity": row.get("quantity", 1.0),
+                    "unit_cost": row.get("unit_cost", 0.0),
+                    "currency": row.get("currency", "USD"),
+                    "origin_country": row.get("origin_country"),
+                    "hs_code": hs_code,
+                    "hs_confidence": hs_confidence,
+                    "is_originating": row.get("is_originating"),
+                    "classified_by": "ai" if hs_confidence else "imported",
+                }
+            )
 
         save_bom_items_sync(product_id, org_id, bom_items)
         return {"status": "completed", "items_processed": len(bom_items)}

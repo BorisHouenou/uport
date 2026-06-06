@@ -1,4 +1,5 @@
 """Data retention enforcement — PIPEDA 7-year / GDPR 3-year audit log purge."""
+
 from datetime import datetime, timedelta, timezone
 
 import structlog
@@ -10,8 +11,8 @@ from core.celery_app import celery_app
 logger = structlog.get_logger()
 
 # Audit events older than this are hard-deleted (configurable via env)
-AUDIT_RETENTION_DAYS = 7 * 365   # 7 years default (Canadian customs requirement)
-CHAT_RETENTION_DAYS  = 2 * 365   # 2 years for chat messages
+AUDIT_RETENTION_DAYS = 7 * 365  # 7 years default (Canadian customs requirement)
+CHAT_RETENTION_DAYS = 2 * 365  # 2 years for chat messages
 
 
 @celery_app.task(name="retention_tasks.enforce_retention", bind=True, max_retries=0)
@@ -28,7 +29,7 @@ def enforce_retention(self):
     engine = create_engine(settings.database_url_sync)
 
     audit_cutoff = datetime.now(timezone.utc) - timedelta(days=AUDIT_RETENTION_DAYS)
-    chat_cutoff  = datetime.now(timezone.utc) - timedelta(days=CHAT_RETENTION_DAYS)
+    chat_cutoff = datetime.now(timezone.utc) - timedelta(days=CHAT_RETENTION_DAYS)
 
     with Session(engine) as session:
         # Hard-delete old audit events

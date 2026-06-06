@@ -1,4 +1,5 @@
 """Clerk webhook event handler — provisions users and orgs in the DB."""
+
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,7 +87,9 @@ async def _upsert_user(session: AsyncSession, data: dict) -> None:
 
     # Clerk puts org memberships in organization_memberships[]
     memberships = data.get("organization_memberships") or []
-    clerk_org_id = memberships[0].get("organization", {}).get("id") if memberships else None
+    clerk_org_id = (
+        memberships[0].get("organization", {}).get("id") if memberships else None
+    )
 
     # Resolve internal org — create a personal org if none
     org = None
@@ -105,11 +108,19 @@ async def _upsert_user(session: AsyncSession, data: dict) -> None:
         org = result.scalar_one_or_none()
         if not org:
             email_addresses = data.get("email_addresses") or []
-            primary = next((e for e in email_addresses if e.get("id") == data.get("primary_email_address_id")), None)
+            primary = next(
+                (
+                    e
+                    for e in email_addresses
+                    if e.get("id") == data.get("primary_email_address_id")
+                ),
+                None,
+            )
             email = (primary or {}).get("email_address", "")
             org = Organization(
                 clerk_org_id=personal_org_id,
-                name=f"{data.get('first_name', '')} {data.get('last_name', '')}".strip() or email,
+                name=f"{data.get('first_name', '')} {data.get('last_name', '')}".strip()
+                or email,
                 country="US",
                 plan="starter",
                 subscription_tier="starter",
@@ -119,7 +130,14 @@ async def _upsert_user(session: AsyncSession, data: dict) -> None:
             await session.flush()
 
     email_addresses = data.get("email_addresses") or []
-    primary = next((e for e in email_addresses if e.get("id") == data.get("primary_email_address_id")), None)
+    primary = next(
+        (
+            e
+            for e in email_addresses
+            if e.get("id") == data.get("primary_email_address_id")
+        ),
+        None,
+    )
     email = (primary or {}).get("email_address", "")
 
     result = await session.execute(

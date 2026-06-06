@@ -4,6 +4,7 @@ PIPEDA (Canada) + GDPR (EU) compliance endpoints.
   GET  /api/v1/privacy/export     — Right of Access: export all org data as JSON
   DELETE /api/v1/privacy/erase    — Right to Erasure: anonymise all PII for the org
 """
+
 import uuid
 from datetime import datetime, timezone
 
@@ -15,8 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db
 from middleware.auth import AdminUser
 from models import (
-    Organization, User, Shipment, OriginDetermination,
-    Certificate, SupplierDeclaration, AuditEvent,
+    Organization,
+    User,
+    Shipment,
+    OriginDetermination,
+    Certificate,
+    SupplierDeclaration,
+    AuditEvent,
 )
 
 router = APIRouter(prefix="/privacy", tags=["privacy"])
@@ -34,27 +40,63 @@ async def export_org_data(
     """
     org_id = uuid.UUID(current_user["org_id"])
 
-    org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalar_one_or_none()
-    users = (await db.execute(select(User).where(User.org_id == org_id))).scalars().all()
-    shipments = (await db.execute(select(Shipment).where(Shipment.org_id == org_id))).scalars().all()
+    org = (
+        await db.execute(select(Organization).where(Organization.id == org_id))
+    ).scalar_one_or_none()
+    users = (
+        (await db.execute(select(User).where(User.org_id == org_id))).scalars().all()
+    )
+    shipments = (
+        (await db.execute(select(Shipment).where(Shipment.org_id == org_id)))
+        .scalars()
+        .all()
+    )
     ship_ids = [s.id for s in shipments]
 
     determinations = certs = []
     if ship_ids:
-        determinations = (await db.execute(
-            select(OriginDetermination).where(OriginDetermination.shipment_id.in_(ship_ids))
-        )).scalars().all()
-        certs = (await db.execute(
-            select(Certificate).where(Certificate.shipment_id.in_(ship_ids))
-        )).scalars().all()
+        determinations = (
+            (
+                await db.execute(
+                    select(OriginDetermination).where(
+                        OriginDetermination.shipment_id.in_(ship_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        certs = (
+            (
+                await db.execute(
+                    select(Certificate).where(Certificate.shipment_id.in_(ship_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
 
-    declarations = (await db.execute(
-        select(SupplierDeclaration).where(SupplierDeclaration.org_id == org_id)
-    )).scalars().all()
+    declarations = (
+        (
+            await db.execute(
+                select(SupplierDeclaration).where(SupplierDeclaration.org_id == org_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
-    audit_events = (await db.execute(
-        select(AuditEvent).where(AuditEvent.org_id == org_id).order_by(AuditEvent.created_at.asc())
-    )).scalars().all()
+    audit_events = (
+        (
+            await db.execute(
+                select(AuditEvent)
+                .where(AuditEvent.org_id == org_id)
+                .order_by(AuditEvent.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     export = {
         "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -121,9 +163,7 @@ async def erase_org_data(
 
     # Anonymise organisation name/country but keep the row for referential integrity
     await db.execute(
-        update(Organization)
-        .where(Organization.id == org_id)
-        .values(name="[erased]")
+        update(Organization).where(Organization.id == org_id).values(name="[erased]")
     )
 
     await db.commit()
@@ -138,26 +178,76 @@ async def erase_org_data(
 
 # ─── Serialisers ──────────────────────────────────────────────────────────────
 
+
 def _org_dict(o: Organization) -> dict:
-    return {"id": str(o.id), "name": o.name, "country": o.country, "plan": getattr(o, "plan", None), "created_at": _iso(o.created_at)}
+    return {
+        "id": str(o.id),
+        "name": o.name,
+        "country": o.country,
+        "plan": getattr(o, "plan", None),
+        "created_at": _iso(o.created_at),
+    }
+
 
 def _user_dict(u: User) -> dict:
-    return {"id": str(u.id), "email": u.email, "role": u.role, "created_at": _iso(u.created_at)}
+    return {
+        "id": str(u.id),
+        "email": u.email,
+        "role": u.role,
+        "created_at": _iso(u.created_at),
+    }
+
 
 def _ship_dict(s: Shipment) -> dict:
-    return {"id": str(s.id), "destination_country": s.destination_country, "origin_country": s.origin_country, "status": s.status, "created_at": _iso(s.created_at)}
+    return {
+        "id": str(s.id),
+        "destination_country": s.destination_country,
+        "origin_country": s.origin_country,
+        "status": s.status,
+        "created_at": _iso(s.created_at),
+    }
+
 
 def _det_dict(d: OriginDetermination) -> dict:
-    return {"id": str(d.id), "agreement_code": d.agreement_code, "result": d.result, "confidence": float(d.confidence), "created_at": _iso(d.created_at)}
+    return {
+        "id": str(d.id),
+        "agreement_code": d.agreement_code,
+        "result": d.result,
+        "confidence": float(d.confidence),
+        "created_at": _iso(d.created_at),
+    }
+
 
 def _cert_dict(c: Certificate) -> dict:
-    return {"id": str(c.id), "cert_type": c.cert_type, "cert_number": c.cert_number, "status": c.status, "issued_at": _iso(c.issued_at)}
+    return {
+        "id": str(c.id),
+        "cert_type": c.cert_type,
+        "cert_number": c.cert_number,
+        "status": c.status,
+        "issued_at": _iso(c.issued_at),
+    }
+
 
 def _decl_dict(d: SupplierDeclaration) -> dict:
-    return {"id": str(d.id), "supplier_name": d.supplier_name, "supplier_country": d.supplier_country, "origin_country": d.origin_country, "valid_from": str(d.valid_from), "valid_until": str(d.valid_until)}
+    return {
+        "id": str(d.id),
+        "supplier_name": d.supplier_name,
+        "supplier_country": d.supplier_country,
+        "origin_country": d.origin_country,
+        "valid_from": str(d.valid_from),
+        "valid_until": str(d.valid_until),
+    }
+
 
 def _audit_dict(e: AuditEvent) -> dict:
-    return {"id": str(e.id), "entity_type": e.entity_type, "action": e.action, "actor_id": e.actor_id, "created_at": _iso(e.created_at)}
+    return {
+        "id": str(e.id),
+        "entity_type": e.entity_type,
+        "action": e.action,
+        "actor_id": e.actor_id,
+        "created_at": _iso(e.created_at),
+    }
+
 
 def _iso(dt) -> str | None:
     return dt.isoformat() if dt else None

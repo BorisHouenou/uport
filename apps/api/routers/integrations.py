@@ -1,4 +1,5 @@
 """Third-party integration endpoints (QuickBooks Online, etc.)."""
+
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -15,6 +16,7 @@ settings = get_settings()
 
 # ─── QuickBooks Online ─────────────────────────────────────────────────────────
 
+
 @router.get("/qbo/connect")
 async def qbo_connect(
     request: Request,
@@ -23,7 +25,10 @@ async def qbo_connect(
     """Return the QBO OAuth2 authorization URL."""
     import sys
     import os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations"))
+
+    sys.path.insert(
+        0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations")
+    )
     from quickbooks.oauth import get_auth_url
 
     state = f"{current_user['org_id']}:{secrets.token_urlsafe(16)}"
@@ -42,7 +47,10 @@ async def qbo_callback(
     """Handle QBO OAuth2 callback and persist tokens."""
     import sys
     import os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations"))
+
+    sys.path.insert(
+        0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations")
+    )
     from quickbooks.oauth import exchange_code
     from services.integration_service import save_qbo_tokens
 
@@ -64,8 +72,12 @@ async def qbo_status(
 ):
     """Return whether QBO is connected for the org."""
     from services.integration_service import get_qbo_connection
+
     conn = await get_qbo_connection(db, current_user["org_id"])
-    return {"connected": conn is not None, "realm_id": conn.get("realm_id") if conn else None}
+    return {
+        "connected": conn is not None,
+        "realm_id": conn.get("realm_id") if conn else None,
+    }
 
 
 @router.post("/qbo/disconnect")
@@ -75,6 +87,7 @@ async def qbo_disconnect(
 ):
     """Revoke QBO tokens and remove connection."""
     from services.integration_service import remove_qbo_connection
+
     await remove_qbo_connection(db, current_user["org_id"])
     return {"disconnected": True}
 
@@ -87,7 +100,10 @@ async def qbo_items(
     """Fetch Items from QBO and return as BOM-compatible rows."""
     import sys
     import os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations"))
+
+    sys.path.insert(
+        0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations")
+    )
     from quickbooks.client import QuickBooksClient, qbo_item_to_bom_row
     from services.integration_service import get_qbo_connection, maybe_refresh_qbo_token
 
@@ -122,7 +138,10 @@ async def qbo_import_bom(
     """Import QBO items as BOM lines for a product, triggering AI HS classification."""
     import sys
     import os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations"))
+
+    sys.path.insert(
+        0, os.path.join(os.path.dirname(__file__), "../../../../packages/integrations")
+    )
     from quickbooks.client import QuickBooksClient, qbo_item_to_bom_row
     from services.integration_service import get_qbo_connection, maybe_refresh_qbo_token
     from services.tasks.bom_tasks import process_bom_from_rows
@@ -152,6 +171,7 @@ async def qbo_import_bom(
 
 # ─── NetSuite ──────────────────────────────────────────────────────────────────
 
+
 class NetSuiteCredentials(BaseModel):
     account_id: str
     consumer_key: str
@@ -174,6 +194,7 @@ async def netsuite_import_bom(
 ):
     """Import BOM from a NetSuite assembly item."""
     import sys
+
     sys.path.insert(0, _INTEGRATIONS_PATH)
     from netsuite.client import NetSuiteClient
     from services.tasks.bom_tasks import process_bom_from_rows
@@ -188,7 +209,9 @@ async def netsuite_import_bom(
     )
     rows = client.get_bom(body.assembly_item_id)
     if not rows:
-        raise HTTPException(status_code=404, detail="No BOM components found for this assembly item")
+        raise HTTPException(
+            status_code=404, detail="No BOM components found for this assembly item"
+        )
 
     task = process_bom_from_rows.delay(
         product_id=body.product_id,
@@ -209,15 +232,19 @@ async def netsuite_items(
 ):
     """List NetSuite inventory items (credential params passed as query for testing)."""
     import sys
+
     sys.path.insert(0, _INTEGRATIONS_PATH)
     from netsuite.client import NetSuiteClient
 
-    client = NetSuiteClient(account_id, consumer_key, consumer_secret, token_id, token_secret)
+    client = NetSuiteClient(
+        account_id, consumer_key, consumer_secret, token_id, token_secret
+    )
     items = client.get_items(limit=50)
     return {"items": items, "count": len(items)}
 
 
 # ─── Flexport ──────────────────────────────────────────────────────────────────
+
 
 class FlexportSyncRequest(BaseModel):
     api_key: str
@@ -234,6 +261,7 @@ async def flexport_sync_shipments(
     """Pull Flexport shipments and create Uportai shipment records."""
     import sys
     import uuid as _uuid
+
     sys.path.insert(0, _INTEGRATIONS_PATH)
     from flexport.client import FlexportClient
     from models import Shipment
@@ -247,21 +275,26 @@ async def flexport_sync_shipments(
     for s in shipments:
         if not s.get("origin_country") or not s.get("destination_country"):
             continue
-        existing = (await db.execute(
-            select(Shipment).where(Shipment.reference_number == s["reference_number"])
-            .where(Shipment.org_id == org_id)
-        )).scalar_one_or_none()
+        existing = (
+            await db.execute(
+                select(Shipment)
+                .where(Shipment.reference_number == s["reference_number"])
+                .where(Shipment.org_id == org_id)
+            )
+        ).scalar_one_or_none()
         if existing:
             continue
-        db.add(Shipment(
-            org_id=org_id,
-            reference_number=s["reference_number"],
-            origin_country=s["origin_country"],
-            destination_country=s["destination_country"],
-            incoterm=s.get("incoterm"),
-            status=s.get("status", "pending"),
-            shipment_value_usd=s.get("shipment_value_usd"),
-        ))
+        db.add(
+            Shipment(
+                org_id=org_id,
+                reference_number=s["reference_number"],
+                origin_country=s["origin_country"],
+                destination_country=s["destination_country"],
+                incoterm=s.get("incoterm"),
+                status=s.get("status", "pending"),
+                shipment_value_usd=s.get("shipment_value_usd"),
+            )
+        )
         created += 1
 
     await db.commit()
@@ -269,6 +302,7 @@ async def flexport_sync_shipments(
 
 
 # ─── SAP B1 ───────────────────────────────────────────────────────────────────
+
 
 class SAPB1ImportRequest(BaseModel):
     product_id: str
@@ -287,6 +321,7 @@ async def sap_b1_import_bom(
 ):
     """Import BOM from SAP Business One."""
     import sys
+
     sys.path.insert(0, _INTEGRATIONS_PATH)
     from sap_b1.client import SAPB1Client
     from services.tasks.bom_tasks import process_bom_from_rows
@@ -311,6 +346,7 @@ async def sap_b1_import_bom(
 
 # ─── ShipBob ──────────────────────────────────────────────────────────────────
 
+
 class ShipbobSyncRequest(BaseModel):
     personal_access_token: str
     page: int = 1
@@ -326,6 +362,7 @@ async def shipbob_sync_shipments(
     """Pull ShipBob shipments and create Uportai shipment records."""
     import sys
     import uuid as _uuid
+
     sys.path.insert(0, _INTEGRATIONS_PATH)
     from shipbob.client import ShipbobClient
     from models import Shipment
@@ -339,19 +376,24 @@ async def shipbob_sync_shipments(
     for s in shipments:
         if not s.get("destination_country"):
             continue
-        existing = (await db.execute(
-            select(Shipment).where(Shipment.reference_number == s["reference_number"])
-            .where(Shipment.org_id == org_id)
-        )).scalar_one_or_none()
+        existing = (
+            await db.execute(
+                select(Shipment)
+                .where(Shipment.reference_number == s["reference_number"])
+                .where(Shipment.org_id == org_id)
+            )
+        ).scalar_one_or_none()
         if existing:
             continue
-        db.add(Shipment(
-            org_id=org_id,
-            reference_number=s["reference_number"],
-            origin_country=s.get("origin_country", "US"),
-            destination_country=s["destination_country"],
-            status=s.get("status", "pending"),
-        ))
+        db.add(
+            Shipment(
+                org_id=org_id,
+                reference_number=s["reference_number"],
+                origin_country=s.get("origin_country", "US"),
+                destination_country=s["destination_country"],
+                status=s.get("status", "pending"),
+            )
+        )
         created += 1
 
     await db.commit()

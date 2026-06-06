@@ -1,4 +1,5 @@
 """Product management endpoints."""
+
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -44,7 +45,9 @@ async def create_product(
 ):
     org_id = current_user.get("org_id")
     if not org_id:
-        raise HTTPException(status_code=403, detail="No organization associated with this account")
+        raise HTTPException(
+            status_code=403, detail="No organization associated with this account"
+        )
 
     product = Product(
         id=uuid.uuid4(),
@@ -69,14 +72,22 @@ async def list_products(
 ):
     org_id = current_user.get("org_id")
     if not org_id:
-        raise HTTPException(status_code=403, detail="No organization associated with this account")
+        raise HTTPException(
+            status_code=403, detail="No organization associated with this account"
+        )
 
-    rows = (await db.execute(
-        select(Product)
-        .where(Product.org_id == uuid.UUID(org_id))
-        .order_by(Product.created_at.desc())
-        .limit(100)
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(Product)
+                .where(Product.org_id == uuid.UUID(org_id))
+                .order_by(Product.created_at.desc())
+                .limit(100)
+            )
+        )
+        .scalars()
+        .all()
+    )
     return [_serialize(p) for p in rows]
 
 
@@ -87,8 +98,12 @@ def _serialize(p: Product) -> dict:
         "description": p.description,
         "hs_code": p.hs_code,
         "hs_description": p.hs_description,
-        "hs_confidence": float(p.hs_confidence) if p.hs_confidence is not None else None,
+        "hs_confidence": float(p.hs_confidence)
+        if p.hs_confidence is not None
+        else None,
         "origin_country": p.origin_country,
         "sku": p.sku,
-        "unit_cost_usd": float(p.unit_cost_usd) if p.unit_cost_usd is not None else None,
+        "unit_cost_usd": float(p.unit_cost_usd)
+        if p.unit_cost_usd is not None
+        else None,
     }

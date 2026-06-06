@@ -4,7 +4,14 @@ from typing import Literal
 
 from schemas.base import TaskResponse, UportaiBase
 
-RuleType = Literal["tariff_shift", "rvc_build_down", "rvc_build_up", "rvc_net_cost", "wholly_obtained", "combined"]
+RuleType = Literal[
+    "tariff_shift",
+    "rvc_build_down",
+    "rvc_build_up",
+    "rvc_net_cost",
+    "wholly_obtained",
+    "combined",
+]
 
 
 class Agreement(UportaiBase):

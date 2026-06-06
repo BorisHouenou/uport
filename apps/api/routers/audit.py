@@ -1,4 +1,5 @@
 """Audit Vault — query and export immutable audit log."""
+
 import csv
 import io
 import uuid
@@ -35,7 +36,9 @@ async def list_audit_events(
     """
     org_id = current_user["org_id"]
     if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="org_id required"
+        )
 
     org_uuid = uuid.UUID(org_id)
 
@@ -60,7 +63,11 @@ async def list_audit_events(
         count_q = count_q.where(AuditEvent.created_at <= to_date)
 
     total = (await db.execute(count_q)).scalar_one()
-    rows = (await db.execute(q.offset((page - 1) * page_size).limit(page_size))).scalars().all()
+    rows = (
+        (await db.execute(q.offset((page - 1) * page_size).limit(page_size)))
+        .scalars()
+        .all()
+    )
 
     return {
         "total": total,
@@ -95,10 +102,20 @@ async def export_audit_csv(
     rows = (await db.execute(q)).scalars().all()
 
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=[
-        "id", "created_at", "entity_type", "entity_id",
-        "action", "actor_id", "actor_email", "ip_address", "payload",
-    ])
+    writer = csv.DictWriter(
+        buf,
+        fieldnames=[
+            "id",
+            "created_at",
+            "entity_type",
+            "entity_id",
+            "action",
+            "actor_id",
+            "actor_email",
+            "ip_address",
+            "payload",
+        ],
+    )
     writer.writeheader()
     for e in rows:
         writer.writerow(_serialize(e))

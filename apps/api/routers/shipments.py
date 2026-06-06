@@ -1,4 +1,5 @@
 """Shipment management endpoints."""
+
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,15 +44,19 @@ async def create_shipment(
 ):
     org_id = current_user.get("org_id")
     if not org_id:
-        raise HTTPException(status_code=403, detail="No organization associated with this account")
+        raise HTTPException(
+            status_code=403, detail="No organization associated with this account"
+        )
 
     # Verify product belongs to org
-    product = (await db.execute(
-        select(Product).where(
-            Product.id == uuid.UUID(payload.product_id),
-            Product.org_id == uuid.UUID(org_id),
+    product = (
+        await db.execute(
+            select(Product).where(
+                Product.id == uuid.UUID(payload.product_id),
+                Product.org_id == uuid.UUID(org_id),
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
@@ -79,14 +84,22 @@ async def list_shipments(
 ):
     org_id = current_user.get("org_id")
     if not org_id:
-        raise HTTPException(status_code=403, detail="No organization associated with this account")
+        raise HTTPException(
+            status_code=403, detail="No organization associated with this account"
+        )
 
-    rows = (await db.execute(
-        select(Shipment)
-        .where(Shipment.org_id == uuid.UUID(org_id))
-        .order_by(Shipment.created_at.desc())
-        .limit(100)
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(Shipment)
+                .where(Shipment.org_id == uuid.UUID(org_id))
+                .order_by(Shipment.created_at.desc())
+                .limit(100)
+            )
+        )
+        .scalars()
+        .all()
+    )
     return [_serialize(s) for s in rows]
 
 
@@ -97,6 +110,8 @@ def _serialize(s: Shipment) -> dict:
         "destination_country": s.destination_country,
         "origin_country": s.origin_country,
         "status": s.status,
-        "shipment_value_usd": float(s.shipment_value_usd) if s.shipment_value_usd is not None else None,
+        "shipment_value_usd": float(s.shipment_value_usd)
+        if s.shipment_value_usd is not None
+        else None,
         "reference_number": s.reference_number,
     }

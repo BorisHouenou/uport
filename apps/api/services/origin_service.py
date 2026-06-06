@@ -1,4 +1,5 @@
 """Origin determination DB service layer."""
+
 import uuid
 from typing import Any
 
@@ -48,11 +49,13 @@ async def list_org_determinations(
 
 # ─── Sync versions for Celery tasks ───────────────────────────────────────────
 
+
 def get_shipment_data_sync(shipment_id: str, org_id: str) -> dict | None:
     """Synchronous DB read for Celery workers."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
     from core.config import get_settings
+
     settings = get_settings()
     engine = create_engine(settings.database_url_sync)
     with Session(engine) as session:
@@ -64,15 +67,21 @@ def get_shipment_data_sync(shipment_id: str, org_id: str) -> dict | None:
         if not ship:
             return None
         # Get product + BOM
-        product = session.execute(
-            select(Product).where(Product.id == ship.product_id)
-        ).scalar_one_or_none() if ship.product_id else None
+        product = (
+            session.execute(
+                select(Product).where(Product.id == ship.product_id)
+            ).scalar_one_or_none()
+            if ship.product_id
+            else None
+        )
 
         bom_items = []
         if product:
-            items = session.execute(
-                select(BOMItem).where(BOMItem.product_id == product.id)
-            ).scalars().all()
+            items = (
+                session.execute(select(BOMItem).where(BOMItem.product_id == product.id))
+                .scalars()
+                .all()
+            )
             bom_items = [
                 {
                     "description": item.description,
@@ -101,6 +110,7 @@ def save_determination_sync(shipment_id: str, org_id: str, result: Any) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
     from core.config import get_settings
+
     settings = get_settings()
     engine = create_engine(settings.database_url_sync)
     with Session(engine) as session:

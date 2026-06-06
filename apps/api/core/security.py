@@ -56,6 +56,7 @@ async def verify_clerk_token(token: str) -> dict:
 def verify_stripe_webhook(payload: bytes, sig_header: str) -> dict:
     """Verify Stripe webhook signature."""
     import stripe
+
     stripe.api_key = settings.stripe_secret_key
     try:
         event = stripe.Webhook.construct_event(

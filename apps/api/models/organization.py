@@ -17,20 +17,34 @@ if TYPE_CHECKING:
 class Organization(Base, TimestampMixin):
     __tablename__ = "organizations"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    clerk_org_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    clerk_org_id: Mapped[str] = mapped_column(
+        String(128), unique=True, nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(256), nullable=False)
-    country: Mapped[str] = mapped_column(String(2), nullable=False, comment="ISO-3166 alpha-2")
+    country: Mapped[str] = mapped_column(
+        String(2), nullable=False, comment="ISO-3166 alpha-2"
+    )
     plan: Mapped[str] = mapped_column(String(32), default="starter", nullable=False)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(128), unique=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(128))
-    subscription_tier: Mapped[str] = mapped_column(String(32), default="starter", nullable=False)
-    subscription_status: Mapped[str] = mapped_column(String(32), default="none", nullable=False)
+    subscription_tier: Mapped[str] = mapped_column(
+        String(32), default="starter", nullable=False
+    )
+    subscription_status: Mapped[str] = mapped_column(
+        String(32), default="none", nullable=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     certificates_used: Mapped[int] = mapped_column(default=0, nullable=False)
     certificates_limit: Mapped[int] = mapped_column(default=10, nullable=False)
 
     # Relationships
     users: Mapped[list["User"]] = relationship("User", back_populates="organization")
-    products: Mapped[list["Product"]] = relationship("Product", back_populates="organization")
-    shipments: Mapped[list["Shipment"]] = relationship("Shipment", back_populates="organization")
+    products: Mapped[list["Product"]] = relationship(
+        "Product", back_populates="organization"
+    )
+    shipments: Mapped[list["Shipment"]] = relationship(
+        "Shipment", back_populates="organization"
+    )

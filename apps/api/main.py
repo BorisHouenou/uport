@@ -1,4 +1,5 @@
 """Uportai API — FastAPI entrypoint."""
+
 import logging as _logging
 
 import structlog
@@ -13,8 +14,20 @@ from core.config import get_settings
 from middleware.audit import AuditMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
 from routers import (
-    agreements, assistant, audit, billing, bom, certificates,
-    health, integrations, origin, outbound_webhooks, privacy, savings, suppliers, webhooks,
+    agreements,
+    assistant,
+    audit,
+    billing,
+    bom,
+    certificates,
+    health,
+    integrations,
+    origin,
+    outbound_webhooks,
+    privacy,
+    savings,
+    suppliers,
+    webhooks,
 )
 from routers import products, shipments
 
@@ -29,7 +42,8 @@ structlog.configure(
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
-        structlog.dev.ConsoleRenderer() if not settings.is_production
+        structlog.dev.ConsoleRenderer()
+        if not settings.is_production
         else structlog.processors.JSONRenderer(),
     ],
 )
@@ -65,6 +79,7 @@ app.add_middleware(AuditMiddleware)
 # ─── Sentry ───────────────────────────────────────────────────────────────────
 if settings.sentry_dsn:
     import sentry_sdk
+
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
         environment=settings.environment,

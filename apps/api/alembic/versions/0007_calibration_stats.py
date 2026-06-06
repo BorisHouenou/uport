@@ -4,6 +4,7 @@ Revision ID: 0007
 Revises: 0006
 Create Date: 2026-05-31
 """
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
@@ -17,11 +18,18 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "calibration_stats",
-        sa.Column("id",          sa.Integer, primary_key=True, autoincrement=True),
-        sa.Column("computed_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("stats",       postgresql.JSONB, nullable=False),
+        sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+        sa.Column(
+            "computed_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column("stats", postgresql.JSONB, nullable=False),
     )
-    op.create_index("ix_calibration_stats_computed_at", "calibration_stats", ["computed_at"])
+    op.create_index(
+        "ix_calibration_stats_computed_at", "calibration_stats", ["computed_at"]
+    )
 
     # Extend human_corrections with hs_code context fields for richer JSONL exports
     op.add_column("human_corrections", sa.Column("hs_chapter", sa.String(4)))

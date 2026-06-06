@@ -3,6 +3,7 @@
 Uses AST parsing to extract TIER_LIMITS / PRICE_IDS without importing the
 module (which has heavy SQLAlchemy + Stripe deps that aren't installed here).
 """
+
 import ast
 import os
 
@@ -14,6 +15,7 @@ PRICE_IDS: dict = {}
 
 tree = ast.parse(open(_SRC).read())
 
+
 def _extract_name_and_value(node):
     """Return (name, value_node) for both Assign and AnnAssign nodes."""
     if isinstance(node, ast.Assign):
@@ -23,6 +25,7 @@ def _extract_name_and_value(node):
     elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
         return node.target.id, node.value
     return None, None
+
 
 for node in ast.walk(tree):
     name, value = _extract_name_and_value(node)
@@ -40,6 +43,7 @@ for node in ast.walk(tree):
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
+
 
 class TestTierLimits:
     def test_all_tiers_defined(self):
@@ -65,7 +69,10 @@ class TestTierLimits:
         assert e["api_access"] is True
 
     def test_growth_shipments_exceed_starter(self):
-        assert TIER_LIMITS["growth"]["shipments_per_month"] > TIER_LIMITS["starter"]["shipments_per_month"]
+        assert (
+            TIER_LIMITS["growth"]["shipments_per_month"]
+            > TIER_LIMITS["starter"]["shipments_per_month"]
+        )
 
     def test_enterprise_users_unlimited(self):
         assert TIER_LIMITS["enterprise"]["users"] == -1
@@ -73,7 +80,9 @@ class TestTierLimits:
     def test_all_tiers_have_required_keys(self):
         required = {"shipments_per_month", "users", "api_access"}
         for tier, limits in TIER_LIMITS.items():
-            assert required <= limits.keys(), f"Tier '{tier}' missing keys: {required - limits.keys()}"
+            assert required <= limits.keys(), (
+                f"Tier '{tier}' missing keys: {required - limits.keys()}"
+            )
 
     def test_starter_no_api_access(self):
         assert TIER_LIMITS["starter"]["api_access"] is False

@@ -1,4 +1,5 @@
 """Savings / ROI computation service."""
+
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -25,7 +26,11 @@ async def get_savings_summary(db: AsyncSession, org_id: uuid.UUID) -> dict[str, 
     # savings_per_unit is expressed as a fraction saved (mfn_rate - pref_rate).
     # When populated it holds absolute dollar savings per unit. We sum it directly.
     savings_q = await db.execute(
-        select(func.coalesce(func.sum(cast(OriginDetermination.savings_per_unit, Float)), 0.0))
+        select(
+            func.coalesce(
+                func.sum(cast(OriginDetermination.savings_per_unit, Float)), 0.0
+            )
+        )
         .join(Shipment, OriginDetermination.shipment_id == Shipment.id)
         .where(Shipment.org_id == org_id)
         .where(OriginDetermination.result == "pass")
@@ -47,9 +52,9 @@ async def get_savings_summary(db: AsyncSession, org_id: uuid.UUID) -> dict[str, 
     det_stats_q = await db.execute(
         select(
             func.count(OriginDetermination.id).label("total"),
-            func.sum(
-                case((OriginDetermination.result == "pass", 1), else_=0)
-            ).label("passing"),
+            func.sum(case((OriginDetermination.result == "pass", 1), else_=0)).label(
+                "passing"
+            ),
         )
         .join(Shipment, OriginDetermination.shipment_id == Shipment.id)
         .where(Shipment.org_id == org_id)
@@ -65,9 +70,11 @@ async def get_savings_summary(db: AsyncSession, org_id: uuid.UUID) -> dict[str, 
     # ── Monthly trend (last 6 months) ─────────────────────────────────────────
     monthly_q = await db.execute(
         select(
-            extract("year",  OriginDetermination.created_at).label("yr"),
+            extract("year", OriginDetermination.created_at).label("yr"),
             extract("month", OriginDetermination.created_at).label("mo"),
-            func.coalesce(func.sum(cast(OriginDetermination.savings_per_unit, Float)), 0.0).label("savings"),
+            func.coalesce(
+                func.sum(cast(OriginDetermination.savings_per_unit, Float)), 0.0
+            ).label("savings"),
             func.count(OriginDetermination.shipment_id.distinct()).label("shipments"),
         )
         .join(Shipment, OriginDetermination.shipment_id == Shipment.id)
@@ -79,8 +86,20 @@ async def get_savings_summary(db: AsyncSession, org_id: uuid.UUID) -> dict[str, 
     )
     monthly_rows = monthly_q.all()
 
-    MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    MONTH_ABBR = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ]
     monthly = [
         {
             "month": MONTH_ABBR[int(r.mo) - 1],
@@ -95,14 +114,18 @@ async def get_savings_summary(db: AsyncSession, org_id: uuid.UUID) -> dict[str, 
         select(
             OriginDetermination.agreement_code,
             OriginDetermination.agreement_name,
-            func.coalesce(func.sum(cast(OriginDetermination.savings_per_unit, Float)), 0.0).label("savings"),
+            func.coalesce(
+                func.sum(cast(OriginDetermination.savings_per_unit, Float)), 0.0
+            ).label("savings"),
             func.count(OriginDetermination.shipment_id.distinct()).label("shipments"),
         )
         .join(Shipment, OriginDetermination.shipment_id == Shipment.id)
         .where(Shipment.org_id == org_id)
         .where(OriginDetermination.result == "pass")
         .where(OriginDetermination.created_at >= year_start)
-        .group_by(OriginDetermination.agreement_code, OriginDetermination.agreement_name)
+        .group_by(
+            OriginDetermination.agreement_code, OriginDetermination.agreement_name
+        )
         .order_by(func.sum(cast(OriginDetermination.savings_per_unit, Float)).desc())
     )
     by_agr_rows = by_agr_q.all()
@@ -119,7 +142,9 @@ async def get_savings_summary(db: AsyncSession, org_id: uuid.UUID) -> dict[str, 
 
     # ── Annual projection ─────────────────────────────────────────────────────
     months_elapsed = now.month + (now.day / 30)
-    annual_projection = round((total_savings_ytd / months_elapsed * 12), 2) if months_elapsed else 0.0
+    annual_projection = (
+        round((total_savings_ytd / months_elapsed * 12), 2) if months_elapsed else 0.0
+    )
 
     return {
         "kpis": {
@@ -139,4 +164,6 @@ def _months_ago(now: datetime, n: int) -> datetime:
     month = now.month - n
     year = now.year + month // 12
     month = month % 12 or 12
-    return now.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+    return now.replace(
+        year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0
+    )

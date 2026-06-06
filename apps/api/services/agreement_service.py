@@ -17,9 +17,7 @@ async def get_applicable_agreements(
         # Using array contains operator for PostgreSQL ARRAY type
         query = query.where(
             TradeAgreement.parties.contains([origin_country.upper()])
-        ).where(
-            TradeAgreement.parties.contains([destination_country.upper()])
-        )
+        ).where(TradeAgreement.parties.contains([destination_country.upper()]))
     result = await db.execute(query)
     agreements = result.scalars().all()
     return {"agreements": agreements, "total": len(agreements)}

@@ -1,4 +1,5 @@
 """Audit logging middleware — records every mutating API call to the audit_events table."""
+
 import time
 import uuid
 from collections.abc import Callable
@@ -38,6 +39,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 # Persist to audit_events table (best-effort — never blocks response)
                 try:
                     from core.database import AsyncSessionLocal as async_session_factory
+
                     org_id = _extract_org_id(request)
                     actor_id = _extract_actor(request)
                     ip = _extract_ip(request)
@@ -73,6 +75,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _extract_org_id(request: Request) -> str | None:
     """Pull org_id from Clerk JWT state if available."""

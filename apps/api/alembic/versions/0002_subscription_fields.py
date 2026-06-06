@@ -4,6 +4,7 @@ Revision ID: 0002
 Revises: 0001
 Create Date: 2026-03-24
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -20,11 +21,15 @@ def upgrade() -> None:
     # ── organizations: subscription columns ───────────────────────────────────
     op.add_column(
         "organizations",
-        sa.Column("subscription_tier", sa.String(32), nullable=False, server_default="starter"),
+        sa.Column(
+            "subscription_tier", sa.String(32), nullable=False, server_default="starter"
+        ),
     )
     op.add_column(
         "organizations",
-        sa.Column("subscription_status", sa.String(32), nullable=False, server_default="none"),
+        sa.Column(
+            "subscription_status", sa.String(32), nullable=False, server_default="none"
+        ),
     )
 
     # ── chat_messages ─────────────────────────────────────────────────────────
@@ -44,7 +49,7 @@ def upgrade() -> None:
             index=True,
         ),
         sa.Column("user_id", sa.String(256), nullable=False, index=True),
-        sa.Column("role", sa.String(16), nullable=False),       # user | assistant
+        sa.Column("role", sa.String(16), nullable=False),  # user | assistant
         sa.Column("content", sa.Text, nullable=False),
         sa.Column("citations", postgresql.JSONB, nullable=True),
         sa.Column(
@@ -54,7 +59,9 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
         ),
     )
-    op.create_index("ix_chat_messages_user_created", "chat_messages", ["user_id", "created_at"])
+    op.create_index(
+        "ix_chat_messages_user_created", "chat_messages", ["user_id", "created_at"]
+    )
 
     # ── integration_tokens ────────────────────────────────────────────────────
     # Created dynamically by integration_service; ensure it exists in schema.

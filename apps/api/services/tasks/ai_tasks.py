@@ -2,22 +2,45 @@
 AI Celery tasks — Sprint 3-4 implementation.
 Bridges the API layer to the AI agent packages.
 """
+
 import os
 import sys
 
 # Add packages to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'packages', 'ai-agents'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'packages', 'roo-engine'))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "..", "..", "packages", "ai-agents"
+    ),
+)
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "..",
+        "..",
+        "..",
+        "packages",
+        "roo-engine",
+    ),
+)
 
 from core.celery_app import celery_app
 
 
 @celery_app.task(name="ai.run_origin_determination", bind=True, max_retries=3)
-def run_origin_determination(self, org_id: str, shipment_id: str, agreement_codes: list):
+def run_origin_determination(
+    self, org_id: str, shipment_id: str, agreement_codes: list
+):
     """Run the full origin determination workflow for a shipment."""
     try:
         from origin_agent import ShipmentInput, run_origin_determination as _run
-        from services.origin_service import get_shipment_data_sync, save_determination_sync
+        from services.origin_service import (
+            get_shipment_data_sync,
+            save_determination_sync,
+        )
 
         # Fetch shipment data from DB (sync version for Celery)
         shipment_data = get_shipment_data_sync(shipment_id, org_id)
@@ -43,16 +66,19 @@ def run_origin_determination(self, org_id: str, shipment_id: str, agreement_code
                 import asyncio
                 import uuid as _uuid
                 from services.webhook_delivery_service import fire_event_sync
-                asyncio.run(fire_event_sync(
-                    org_id=_uuid.UUID(org_id),
-                    event_type="compliance.alert",
-                    payload={
-                        "shipment_id": shipment_id,
-                        "overall_result": result.overall_result,
-                        "best_agreement": result.best_agreement,
-                        "message": "No qualifying agreement found for this shipment.",
-                    },
-                ))
+
+                asyncio.run(
+                    fire_event_sync(
+                        org_id=_uuid.UUID(org_id),
+                        event_type="compliance.alert",
+                        payload={
+                            "shipment_id": shipment_id,
+                            "overall_result": result.overall_result,
+                            "best_agreement": result.best_agreement,
+                            "message": "No qualifying agreement found for this shipment.",
+                        },
+                    )
+                )
             except Exception:
                 pass
 
@@ -67,6 +93,7 @@ def classify_hs_code_task(self, description: str, org_id: str):
     """Classify a product description to an HS code."""
     try:
         from hs_classifier import classify
+
         result = classify(description)
         return {
             "hs_code": result.hs_code,

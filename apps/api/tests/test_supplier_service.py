@@ -1,6 +1,8 @@
 """Unit tests for supplier_service helpers (pure date logic, no DB)."""
+
 import sys
 import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from datetime import date, timedelta
@@ -50,6 +52,7 @@ class TestSchemaNormalization:
         """All required fields should be present in schema."""
         import sys
         import os
+
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         from schemas.suppliers import SupplierDeclarationCreate
         import uuid
@@ -87,6 +90,7 @@ class TestSchemaNormalization:
 
     def test_supplier_declaration_list_schema(self):
         from schemas.suppliers import SupplierDeclarationList
+
         sl = SupplierDeclarationList(declarations=[], total=0, expiring_soon=0)
         assert sl.total == 0
         assert sl.expiring_soon == 0

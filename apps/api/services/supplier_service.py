@@ -1,4 +1,5 @@
 """Supplier declaration service — CRUD + S3 document attachment."""
+
 from __future__ import annotations
 
 import uuid
@@ -92,6 +93,7 @@ async def attach_document(
 
     if settings.environment == "development":
         import pathlib
+
         path = pathlib.Path(f"/tmp/{s3_key}")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
@@ -130,7 +132,9 @@ async def list_declarations(
     declarations = result.scalars().all()
 
     warn_cutoff = date.today() + timedelta(days=EXPIRY_WARN_DAYS)
-    expiring_soon = sum(1 for d in declarations if date.today() <= d.valid_until <= warn_cutoff)
+    expiring_soon = sum(
+        1 for d in declarations if date.today() <= d.valid_until <= warn_cutoff
+    )
 
     return SupplierDeclarationList(
         declarations=[_to_response(d) for d in declarations],

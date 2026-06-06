@@ -1,4 +1,5 @@
 """Incoming webhook handlers (Stripe, Clerk)."""
+
 from fastapi import APIRouter, Depends, Header, Request
 
 from core.config import get_settings
@@ -32,7 +33,10 @@ async def stripe_webhook(
 
     if event_type == "checkout.session.completed":
         await handle_checkout_completed(event_data, db)
-    elif event_type in ("customer.subscription.updated", "customer.subscription.trial_will_end"):
+    elif event_type in (
+        "customer.subscription.updated",
+        "customer.subscription.trial_will_end",
+    ):
         await handle_subscription_updated(event_data, db)
     elif event_type == "customer.subscription.deleted":
         await handle_subscription_deleted(event_data, db)
@@ -46,6 +50,7 @@ async def stripe_webhook(
 async def clerk_webhook(request: Request):
     """Handle Clerk user/org lifecycle events (user.created, org.created, etc.)."""
     from services.auth_service import handle_clerk_event
+
     payload = await request.json()
     await handle_clerk_event(payload)
     return {"received": True}

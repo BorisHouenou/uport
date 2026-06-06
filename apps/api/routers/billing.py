@@ -1,4 +1,5 @@
 """Stripe billing endpoints: checkout, portal, subscription info."""
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +11,7 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 
 class CheckoutRequest(BaseModel):
-    tier: str          # starter | growth | enterprise
+    tier: str  # starter | growth | enterprise
     success_url: str
     cancel_url: str
 
@@ -58,7 +59,9 @@ async def customer_portal(
     )
     org = result.scalar_one_or_none()
     if not org or not org.stripe_customer_id:
-        raise HTTPException(status_code=404, detail="No Stripe customer found for this org")
+        raise HTTPException(
+            status_code=404, detail="No Stripe customer found for this org"
+        )
 
     url = await create_portal_session(org.stripe_customer_id, body.return_url)
     return {"url": url}
@@ -71,6 +74,7 @@ async def subscription_info(
 ):
     """Return the current subscription tier, status, and limits."""
     from services.billing_service import get_subscription_info
+
     return await get_subscription_info(current_user["org_id"], db)
 
 
@@ -81,4 +85,5 @@ async def certificate_usage(
 ):
     """Return current month certificate usage vs. plan included count."""
     from services.billing_service import get_certificate_usage
+
     return await get_certificate_usage(current_user["org_id"], db)

@@ -1,4 +1,5 @@
 """BOM DB service layer."""
+
 import uuid
 
 import structlog
@@ -17,13 +18,16 @@ async def get_bom_items(
 ) -> dict:
     # Verify product belongs to org
     product = await db.execute(
-        select(Product)
-        .where(Product.id == product_id)
-        .where(Product.org_id == org_id)
+        select(Product).where(Product.id == product_id).where(Product.org_id == org_id)
     )
     product = product.scalar_one_or_none()
     if not product:
-        return {"product_id": product_id, "items": [], "total_items": 0, "total_cost_usd": 0.0}
+        return {
+            "product_id": product_id,
+            "items": [],
+            "total_items": 0,
+            "total_cost_usd": 0.0,
+        }
 
     items_result = await db.execute(
         select(BOMItem).where(BOMItem.product_id == product_id)
@@ -35,7 +39,8 @@ async def get_bom_items(
     non_orig = sum(
         float(i.unit_cost) * float(i.quantity)
         for i in items
-        if i.origin_country in ("XX", None) or (product.origin_country and i.origin_country != product.origin_country)
+        if i.origin_country in ("XX", None)
+        or (product.origin_country and i.origin_country != product.origin_country)
     )
     foreign_pct = round((non_orig / total_cost * 100) if total_cost > 0 else 0, 2)
 
@@ -51,7 +56,9 @@ async def get_bom_items(
                 "currency": i.currency,
                 "origin_country": i.origin_country,
                 "hs_code": i.hs_code,
-                "hs_confidence": float(i.hs_confidence) if i.hs_confidence is not None else None,
+                "hs_confidence": float(i.hs_confidence)
+                if i.hs_confidence is not None
+                else None,
                 "classified_by": i.classified_by,
                 "total_cost": round(float(i.unit_cost) * float(i.quantity), 4),
                 "created_at": i.created_at,
@@ -70,11 +77,14 @@ def save_bom_items_sync(product_id: str, org_id: str, items: list[dict]) -> None
     from sqlalchemy import create_engine, delete
     from sqlalchemy.orm import Session
     from core.config import get_settings
+
     settings = get_settings()
     engine = create_engine(settings.database_url_sync)
     with Session(engine) as session:
         # Replace existing BOM items for this product
-        session.execute(delete(BOMItem).where(BOMItem.product_id == uuid.UUID(product_id)))
+        session.execute(
+            delete(BOMItem).where(BOMItem.product_id == uuid.UUID(product_id))
+        )
         for item in items:
             bom = BOMItem(
                 id=uuid.uuid4(),

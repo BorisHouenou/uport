@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # Railway PostgreSQL add-on sets DATABASE_URL as postgresql://...
     # We normalise to asyncpg and derive the sync URL automatically.
     database_url: str
-    database_url_sync: str = ""   # auto-derived from database_url if not set
+    database_url_sync: str = ""  # auto-derived from database_url if not set
     db_pool_size: int = 10
     db_max_overflow: int = 20
 
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
         url = self.database_url
         # Normalise postgres:// → postgresql:// (Railway uses the short form)
         if url.startswith("postgres://"):
-            url = "postgresql://" + url[len("postgres://"):]
+            url = "postgresql://" + url[len("postgres://") :]
         # Ensure async URL has +asyncpg driver
         if url.startswith("postgresql://") and "+asyncpg" not in url:
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     s3_bucket_documents: str = "uportai-documents"
 
     # ─── Email (AWS SES) ──────────────────────────────────────
-    ses_from_email: str = ""           # e.g. "noreply@uportai.com"
+    ses_from_email: str = ""  # e.g. "noreply@uportai.com"
     app_base_url: str = "https://app.uportai.com"
 
     # ─── Observability ────────────────────────────────────────

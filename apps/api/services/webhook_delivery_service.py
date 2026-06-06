@@ -5,6 +5,7 @@ Sends HMAC-SHA256 signed HTTP POST requests to registered endpoints.
 Delivery is best-effort with up to 3 retries (0s, 5s, 30s back-off).
 Events are fired in a background asyncio task — never blocks the caller.
 """
+
 import asyncio
 import hashlib
 import hmac
@@ -50,6 +51,7 @@ async def fire_event_sync(
 
 # ─── Internal ─────────────────────────────────────────────────────────────────
 
+
 async def _deliver_to_all(org_id: uuid.UUID, event_type: str, payload: dict) -> None:
     async with AsyncSessionLocal() as db:
         endpoints = await _get_subscribed_endpoints(db, org_id, event_type)
@@ -59,17 +61,19 @@ async def _deliver_to_all(org_id: uuid.UUID, event_type: str, payload: dict) -> 
 
     event_id = str(uuid.uuid4())
     timestamp = int(time.time())
-    body = json.dumps({
-        "id": event_id,
-        "type": event_type,
-        "created": timestamp,
-        "data": payload,
-    }, default=str)
+    body = json.dumps(
+        {
+            "id": event_id,
+            "type": event_type,
+            "created": timestamp,
+            "data": payload,
+        },
+        default=str,
+    )
 
-    await asyncio.gather(*[
-        _deliver_with_retry(ep, body, event_type, event_id)
-        for ep in endpoints
-    ])
+    await asyncio.gather(
+        *[_deliver_with_retry(ep, body, event_type, event_id) for ep in endpoints]
+    )
 
 
 async def _get_subscribed_endpoints(
@@ -109,11 +113,26 @@ async def _deliver_with_retry(
                     },
                 )
             if resp.status_code < 300:
-                logger.info("webhook_delivered", endpoint=str(ep.id), event=event_type, attempt=attempt + 1)
+                logger.info(
+                    "webhook_delivered",
+                    endpoint=str(ep.id),
+                    event=event_type,
+                    attempt=attempt + 1,
+                )
                 return
-            logger.warning("webhook_non_2xx", endpoint=str(ep.id), status=resp.status_code, attempt=attempt + 1)
+            logger.warning(
+                "webhook_non_2xx",
+                endpoint=str(ep.id),
+                status=resp.status_code,
+                attempt=attempt + 1,
+            )
         except Exception as exc:
-            logger.warning("webhook_error", endpoint=str(ep.id), error=str(exc), attempt=attempt + 1)
+            logger.warning(
+                "webhook_error",
+                endpoint=str(ep.id),
+                error=str(exc),
+                attempt=attempt + 1,
+            )
 
     logger.error("webhook_failed_all_retries", endpoint=str(ep.id), event=event_type)
 

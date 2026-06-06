@@ -1,4 +1,5 @@
 """Security response headers middleware (OWASP / SOC 2 hardening)."""
+
 from collections.abc import Callable
 
 from fastapi import Request, Response

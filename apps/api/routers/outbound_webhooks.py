@@ -1,4 +1,5 @@
 """Outbound webhook endpoint management (register, list, delete)."""
+
 import secrets
 import uuid
 
@@ -13,7 +14,12 @@ from models.webhook import WebhookEndpoint
 
 router = APIRouter(prefix="/webhooks/endpoints", tags=["webhooks"])
 
-SUPPORTED_EVENTS = {"certificate.issued", "declaration.expired", "compliance.alert", "*"}
+SUPPORTED_EVENTS = {
+    "certificate.issued",
+    "declaration.expired",
+    "compliance.alert",
+    "*",
+}
 
 
 class EndpointCreate(BaseModel):
@@ -123,7 +129,9 @@ async def delete_endpoint(
     await db.commit()
 
 
-async def _get_ep(db: AsyncSession, endpoint_id: uuid.UUID, org_id_str: str) -> WebhookEndpoint:
+async def _get_ep(
+    db: AsyncSession, endpoint_id: uuid.UUID, org_id_str: str
+) -> WebhookEndpoint:
     org_id = uuid.UUID(org_id_str)
     result = await db.execute(
         select(WebhookEndpoint)
@@ -132,5 +140,7 @@ async def _get_ep(db: AsyncSession, endpoint_id: uuid.UUID, org_id_str: str) -> 
     )
     ep = result.scalar_one_or_none()
     if not ep:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not found"
+        )
     return ep

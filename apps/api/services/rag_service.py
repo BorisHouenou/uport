@@ -1,4 +1,5 @@
 """Inline RAG compliance assistant — uses Anthropic API directly."""
+
 from __future__ import annotations
 
 import json
@@ -98,7 +99,12 @@ async def stream_compliance_answer(
 
     api_key = settings.anthropic_api_key
     if not api_key:
-        yield json.dumps({"type": "text", "text": "The compliance assistant requires an Anthropic API key. Please contact your administrator."})
+        yield json.dumps(
+            {
+                "type": "text",
+                "text": "The compliance assistant requires an Anthropic API key. Please contact your administrator.",
+            }
+        )
         return
 
     # Build system prompt with agreement filter
@@ -121,16 +127,28 @@ async def stream_compliance_answer(
             async for text in stream.text_stream:
                 yield json.dumps({"type": "text", "text": text})
 
-        citations = _extract_citations(messages[-1].get("content", "") if messages else "", agreement_filter)
+        citations = _extract_citations(
+            messages[-1].get("content", "") if messages else "", agreement_filter
+        )
         if citations:
             yield json.dumps({"type": "citations", "citations": citations})
 
     except anthropic_lib.APIError as e:
         logger.error("anthropic_api_error", error=str(e))
-        yield json.dumps({"type": "text", "text": f"API error: {e.message if hasattr(e, 'message') else str(e)}"})
+        yield json.dumps(
+            {
+                "type": "text",
+                "text": f"API error: {e.message if hasattr(e, 'message') else str(e)}",
+            }
+        )
     except Exception as e:
         logger.error("rag_stream_error", error=str(e))
-        yield json.dumps({"type": "text", "text": "An error occurred while processing your question. Please try again."})
+        yield json.dumps(
+            {
+                "type": "text",
+                "text": "An error occurred while processing your question. Please try again.",
+            }
+        )
 
 
 def _extract_citations(question: str, agreement_filter: list[str] | None) -> list[dict]:
@@ -140,26 +158,60 @@ def _extract_citations(question: str, agreement_filter: list[str] | None) -> lis
 
     if any(w in q for w in ["vehicle", "car", "automotive", "passenger"]):
         if not agreement_filter or "cusma" in agreement_filter:
-            citations.append({"agreement": "CUSMA", "reference": "Annex 4-B, HS 8703", "url": None})
+            citations.append(
+                {"agreement": "CUSMA", "reference": "Annex 4-B, HS 8703", "url": None}
+            )
         if not agreement_filter or "cptpp" in agreement_filter:
-            citations.append({"agreement": "CPTPP", "reference": "Annex 3-D, HS 8703", "url": None})
+            citations.append(
+                {"agreement": "CPTPP", "reference": "Annex 3-D, HS 8703", "url": None}
+            )
 
     if any(w in q for w in ["rvc", "regional value", "value content", "threshold"]):
         if not agreement_filter or "cusma" in agreement_filter:
-            citations.append({"agreement": "CUSMA", "reference": "Article 4.5 — Regional Value Content", "url": None})
+            citations.append(
+                {
+                    "agreement": "CUSMA",
+                    "reference": "Article 4.5 — Regional Value Content",
+                    "url": None,
+                }
+            )
         if not agreement_filter or "ceta" in agreement_filter:
-            citations.append({"agreement": "CETA", "reference": "Protocol on Rules of Origin, Art. 6", "url": None})
+            citations.append(
+                {
+                    "agreement": "CETA",
+                    "reference": "Protocol on Rules of Origin, Art. 6",
+                    "url": None,
+                }
+            )
 
     if any(w in q for w in ["textile", "apparel", "fabric", "yarn", "fiber"]):
         if not agreement_filter or "cusma" in agreement_filter:
-            citations.append({"agreement": "CUSMA", "reference": "Chapter 6 — Textile and Apparel Goods", "url": None})
+            citations.append(
+                {
+                    "agreement": "CUSMA",
+                    "reference": "Chapter 6 — Textile and Apparel Goods",
+                    "url": None,
+                }
+            )
 
     if any(w in q for w in ["tariff shift", "ctc", "cth", "ctsh", "classification"]):
         if not agreement_filter or "cusma" in agreement_filter:
-            citations.append({"agreement": "CUSMA", "reference": "Article 4.2 — Originating Goods", "url": None})
+            citations.append(
+                {
+                    "agreement": "CUSMA",
+                    "reference": "Article 4.2 — Originating Goods",
+                    "url": None,
+                }
+            )
 
     if any(w in q for w in ["wholly obtained", "wholly produced", "natural"]):
-        citations.append({"agreement": "CUSMA/CETA/CPTPP", "reference": "Wholly Obtained rules — Chapter 4 / Protocol Art. 4", "url": None})
+        citations.append(
+            {
+                "agreement": "CUSMA/CETA/CPTPP",
+                "reference": "Wholly Obtained rules — Chapter 4 / Protocol Art. 4",
+                "url": None,
+            }
+        )
 
     return citations
 
@@ -175,6 +227,7 @@ async def save_chat_turn(
     """Persist a chat turn to chat_messages table."""
     try:
         from models.chat import ChatMessage
+
         for role, content in [("user", user_content), ("assistant", assistant_content)]:
             msg = ChatMessage(
                 id=uuid.uuid4(),
@@ -194,6 +247,7 @@ async def get_chat_history(db: AsyncSession, user_id: str, limit: int = 50) -> d
     """Retrieve recent chat history."""
     try:
         from models.chat import ChatMessage
+
         result = await db.execute(
             select(ChatMessage)
             .where(ChatMessage.user_id == user_id)
@@ -203,7 +257,11 @@ async def get_chat_history(db: AsyncSession, user_id: str, limit: int = 50) -> d
         rows = result.scalars().all()
         return {
             "messages": [
-                {"role": m.role, "content": m.content, "created_at": m.created_at.isoformat() if m.created_at else None}
+                {
+                    "role": m.role,
+                    "content": m.content,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
                 for m in reversed(rows)
             ]
         }

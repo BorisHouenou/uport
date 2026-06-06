@@ -1,4 +1,5 @@
 """Celery tasks for supplier declaration expiry email reminders."""
+
 from datetime import date, timedelta
 
 import structlog
@@ -35,18 +36,27 @@ def send_expiry_reminders(self):
             target_date = today + timedelta(days=days)
 
             # Find declarations expiring exactly on the target date
-            expiring = session.execute(
-                select(SupplierDeclaration)
-                .where(SupplierDeclaration.valid_until == target_date)
-            ).scalars().all()
+            expiring = (
+                session.execute(
+                    select(SupplierDeclaration).where(
+                        SupplierDeclaration.valid_until == target_date
+                    )
+                )
+                .scalars()
+                .all()
+            )
 
             for decl in expiring:
                 # Find admin users for this org
-                admins = session.execute(
-                    select(User)
-                    .where(User.org_id == decl.org_id)
-                    .where(User.role.in_(["admin", "org:admin"]))
-                ).scalars().all()
+                admins = (
+                    session.execute(
+                        select(User)
+                        .where(User.org_id == decl.org_id)
+                        .where(User.role.in_(["admin", "org:admin"]))
+                    )
+                    .scalars()
+                    .all()
+                )
 
                 dashboard_url = f"{getattr(settings, 'app_base_url', 'https://app.uportai.com')}/supplier"
 

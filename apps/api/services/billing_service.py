@@ -6,6 +6,7 @@ Subscription tiers:
   growth    — $499/mo  — 100 shipments/mo, 10 users, API access
   enterprise— $1499/mo — unlimited,        SSO, dedicated support
 """
+
 from __future__ import annotations
 
 import os
@@ -24,14 +25,16 @@ stripe.api_key = get_settings().stripe_secret_key
 # Price IDs (set in environment / Stripe dashboard)
 # ──────────────────────────────────────────────
 PRICE_IDS: dict[str, str] = {
-    "starter":    os.getenv("STRIPE_PRICE_STARTER",    "price_starter_placeholder"),
-    "growth":     os.getenv("STRIPE_PRICE_GROWTH",     "price_growth_placeholder"),
+    "starter": os.getenv("STRIPE_PRICE_STARTER", "price_starter_placeholder"),
+    "growth": os.getenv("STRIPE_PRICE_GROWTH", "price_growth_placeholder"),
     "enterprise": os.getenv("STRIPE_PRICE_ENTERPRISE", "price_enterprise_placeholder"),
 }
 
 # Metered overage price — charged per certificate above plan limit
 # Set STRIPE_PRICE_CERT_OVERAGE in Stripe dashboard (metered, $2/unit)
-PRICE_CERT_OVERAGE: str = os.getenv("STRIPE_PRICE_CERT_OVERAGE", "price_cert_overage_placeholder")
+PRICE_CERT_OVERAGE: str = os.getenv(
+    "STRIPE_PRICE_CERT_OVERAGE", "price_cert_overage_placeholder"
+)
 
 # Included certificates per tier per month (matches certificates_limit in Organization)
 CERT_INCLUDED: dict[str, int] = {
@@ -41,15 +44,16 @@ CERT_INCLUDED: dict[str, int] = {
 }
 
 TIER_LIMITS: dict[str, dict[str, Any]] = {
-    "starter":    {"shipments_per_month": 25,  "users": 3,   "api_access": False},
-    "growth":     {"shipments_per_month": 100, "users": 10,  "api_access": True},
-    "enterprise": {"shipments_per_month": -1,  "users": -1,  "api_access": True},
+    "starter": {"shipments_per_month": 25, "users": 3, "api_access": False},
+    "growth": {"shipments_per_month": 100, "users": 10, "api_access": True},
+    "enterprise": {"shipments_per_month": -1, "users": -1, "api_access": True},
 }
 
 
 # ──────────────────────────────────────────────
 # Checkout session
 # ──────────────────────────────────────────────
+
 
 async def create_checkout_session(
     org_id: str,
@@ -79,6 +83,7 @@ async def create_checkout_session(
 # Customer portal (manage subscription)
 # ──────────────────────────────────────────────
 
+
 async def create_portal_session(stripe_customer_id: str, return_url: str) -> str:
     session = stripe.billing_portal.Session.create(
         customer=stripe_customer_id,
@@ -90,6 +95,7 @@ async def create_portal_session(stripe_customer_id: str, return_url: str) -> str
 # ──────────────────────────────────────────────
 # Webhook event handlers
 # ──────────────────────────────────────────────
+
 
 async def handle_checkout_completed(event_data: dict, db: AsyncSession) -> None:
     """Persist Stripe customer + subscription after first checkout."""
@@ -121,7 +127,7 @@ async def handle_subscription_updated(event_data: dict, db: AsyncSession) -> Non
     if not org_id:
         return
 
-    status = sub["status"]           # active | past_due | canceled | trialing
+    status = sub["status"]  # active | past_due | canceled | trialing
     tier = sub["metadata"].get("tier", "starter")
 
     await db.execute(
@@ -169,7 +175,10 @@ async def handle_invoice_payment_failed(event_data: dict, db: AsyncSession) -> N
 # Usage-based billing — certificate metering
 # ──────────────────────────────────────────────
 
-async def record_certificate_usage(org_id: str, db: AsyncSession, quantity: int = 1) -> None:
+
+async def record_certificate_usage(
+    org_id: str, db: AsyncSession, quantity: int = 1
+) -> None:
     """
     Report certificate usage to Stripe for metered billing.
 
@@ -203,7 +212,11 @@ async def record_certificate_usage(org_id: str, db: AsyncSession, quantity: int 
     try:
         sub = stripe.Subscription.retrieve(org.stripe_subscription_id, expand=["items"])
         metered_item = next(
-            (item for item in sub["items"]["data"] if item["price"]["id"] == PRICE_CERT_OVERAGE),
+            (
+                item
+                for item in sub["items"]["data"]
+                if item["price"]["id"] == PRICE_CERT_OVERAGE
+            ),
             None,
         )
         if metered_item:
@@ -239,11 +252,16 @@ async def get_certificate_usage(org_id: str, db: AsyncSession) -> dict:
 # Query helpers
 # ──────────────────────────────────────────────
 
+
 async def get_subscription_info(org_id: str, db: AsyncSession) -> dict:
     result = await db.execute(select(Organization).where(Organization.id == org_id))
     org = result.scalar_one_or_none()
     if not org:
-        return {"tier": "free", "status": "none", "limits": TIER_LIMITS.get("starter", {})}
+        return {
+            "tier": "free",
+            "status": "none",
+            "limits": TIER_LIMITS.get("starter", {}),
+        }
 
     tier = getattr(org, "subscription_tier", "free") or "free"
     status = getattr(org, "subscription_status", "none") or "none"

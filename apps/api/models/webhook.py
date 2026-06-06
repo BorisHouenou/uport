@@ -1,4 +1,5 @@
 """Outbound webhook endpoint registration."""
+
 import uuid
 
 from sqlalchemy import Boolean, ForeignKey, String, Text
@@ -18,15 +19,24 @@ class WebhookEndpoint(Base, TimestampMixin):
       - declaration.expired
       - compliance.alert
     """
+
     __tablename__ = "webhook_endpoints"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     org_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     url: Mapped[str] = mapped_column(Text, nullable=False)
-    secret: Mapped[str] = mapped_column(String(128), nullable=False)  # HMAC signing secret
-    events: Mapped[list[str]] = mapped_column(ARRAY(String(64)), nullable=False, default=list)
+    secret: Mapped[str] = mapped_column(
+        String(128), nullable=False
+    )  # HMAC signing secret
+    events: Mapped[list[str]] = mapped_column(
+        ARRAY(String(64)), nullable=False, default=list
+    )
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(256))

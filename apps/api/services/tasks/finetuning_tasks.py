@@ -11,6 +11,7 @@ Format (Anthropic Messages API fine-tuning format):
       {"role": "assistant", "content": "<corrected result JSON>"}
   ]}
 """
+
 from __future__ import annotations
 
 import json
@@ -41,9 +42,13 @@ def export_corrections(self):
 
     with Session(engine) as session:
         # Fetch corrections not yet exported
-        corrections = session.execute(
-            select(HumanCorrection).where(HumanCorrection.exported_at.is_(None))
-        ).scalars().all()
+        corrections = (
+            session.execute(
+                select(HumanCorrection).where(HumanCorrection.exported_at.is_(None))
+            )
+            .scalars()
+            .all()
+        )
 
         if not corrections:
             logger.info("finetuning_export_skipped", reason="no new corrections")
@@ -53,18 +58,24 @@ def export_corrections(self):
         lines = []
         for c in corrections:
             user_content = _build_user_prompt(c)
-            assistant_content = json.dumps({
-                "result": c.corrected_result or c.original_result,
-                "rule_applied": c.corrected_rule or c.original_rule,
-                "agreement_code": c.agreement_code,
-                "reviewer_notes": c.reviewer_notes,
-            })
-            lines.append(json.dumps({
-                "messages": [
-                    {"role": "user",      "content": user_content},
-                    {"role": "assistant", "content": assistant_content},
-                ]
-            }))
+            assistant_content = json.dumps(
+                {
+                    "result": c.corrected_result or c.original_result,
+                    "rule_applied": c.corrected_rule or c.original_rule,
+                    "agreement_code": c.agreement_code,
+                    "reviewer_notes": c.reviewer_notes,
+                }
+            )
+            lines.append(
+                json.dumps(
+                    {
+                        "messages": [
+                            {"role": "user", "content": user_content},
+                            {"role": "assistant", "content": assistant_content},
+                        ]
+                    }
+                )
+            )
 
         jsonl_content = "\n".join(lines).encode("utf-8")
         s3_key = f"fine-tuning/{today}/corrections.jsonl"
@@ -72,6 +83,7 @@ def export_corrections(self):
         # Upload to S3
         try:
             import boto3
+
             s3 = boto3.client("s3", region_name=settings.aws_region)
             s3.put_object(
                 Bucket=settings.s3_bucket_documents,
@@ -111,11 +123,15 @@ def _build_user_prompt(c: HumanCorrection) -> str:
         parts.append(f"AI confidence at review: {c.confidence_at_review:.0%}")
     if c.product_description:
         parts.append(f"Product: {c.product_description}")
-    parts.append("Based on the above, provide the correct origin determination as JSON.")
+    parts.append(
+        "Based on the above, provide the correct origin determination as JSON."
+    )
     return "\n".join(parts)
 
 
-@celery_app.task(name="finetuning_tasks.compute_calibration_stats", bind=True, max_retries=0)
+@celery_app.task(
+    name="finetuning_tasks.compute_calibration_stats", bind=True, max_retries=0
+)
 def compute_calibration_stats(self):
     """
     Compute accuracy stats from human_corrections and write to DB cache.
@@ -128,11 +144,13 @@ def compute_calibration_stats(self):
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import Session
     from core.config import get_settings
+
     settings = get_settings()
     engine = create_engine(settings.database_url_sync)
 
     with Session(engine) as session:
-        rows = session.execute(text("""
+        rows = session.execute(
+            text("""
             SELECT
                 agreement_code,
                 COUNT(*)                                                               AS total,
@@ -144,7 +162,8 @@ def compute_calibration_stats(self):
             WHERE created_at > NOW() - INTERVAL '90 days'
             GROUP BY agreement_code
             ORDER BY total DESC
-        """)).fetchall()
+        """)
+        ).fetchall()
 
         stats = {}
         for r in rows:
@@ -160,10 +179,13 @@ def compute_calibration_stats(self):
 
         # Persist as JSONB in a dedicated table (created by migration 0005+)
         try:
-            session.execute(text("""
+            session.execute(
+                text("""
                 INSERT INTO calibration_stats (computed_at, stats)
                 VALUES (NOW(), :stats::jsonb)
-            """), {"stats": json.dumps(stats)})
+            """),
+                {"stats": json.dumps(stats)},
+            )
             session.commit()
         except Exception as exc:
             logger.warning("calibration_stats_persist_failed", error=str(exc))
@@ -174,8 +196,21 @@ def compute_calibration_stats(self):
         try:
             import sys
             import os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "packages", "roo-engine"))
+
+            sys.path.insert(
+                0,
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "..",
+                    "..",
+                    "..",
+                    "packages",
+                    "roo-engine",
+                ),
+            )
             from confidence import HistoricalCalibrator
+
             HistoricalCalibrator._loaded = False
             HistoricalCalibrator.load(settings.database_url_sync)
             logger.info("confidence_calibrator_refreshed")

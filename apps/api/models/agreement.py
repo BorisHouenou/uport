@@ -12,8 +12,12 @@ from models.base import TimestampMixin
 class TradeAgreement(Base, TimestampMixin):
     __tablename__ = "trade_agreements"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    code: Mapped[str] = mapped_column(
+        String(32), unique=True, nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     parties: Mapped[list[str]] = mapped_column(ARRAY(String(2)), nullable=False)
     effective_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -27,9 +31,14 @@ class TradeAgreement(Base, TimestampMixin):
 class RooRule(Base, TimestampMixin):
     __tablename__ = "roo_rules"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     agreement_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("trade_agreements.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("trade_agreements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     hs_chapter: Mapped[str | None] = mapped_column(String(2), index=True)
     hs_heading: Mapped[str | None] = mapped_column(String(4), index=True)
@@ -40,4 +49,6 @@ class RooRule(Base, TimestampMixin):
     tariff_shift_description: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
 
-    agreement: Mapped["TradeAgreement"] = relationship("TradeAgreement", back_populates="rules")
+    agreement: Mapped["TradeAgreement"] = relationship(
+        "TradeAgreement", back_populates="rules"
+    )

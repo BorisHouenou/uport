@@ -1,4 +1,5 @@
 """Certificate generation, storage, and retrieval service."""
+
 from __future__ import annotations
 
 import os
@@ -15,7 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import get_settings
 from models import Certificate, OriginDetermination, Organization, Product, Shipment
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'packages', 'certificate-gen'))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "packages", "certificate-gen"
+    ),
+)
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -50,10 +56,16 @@ async def list_org_certificates(
         .join(Shipment, Certificate.shipment_id == Shipment.id)
         .where(Shipment.org_id == org_id)
         .order_by(Certificate.created_at.desc())
-        .offset(offset).limit(page_size)
+        .offset(offset)
+        .limit(page_size)
     )
     certs = result.scalars().all()
-    return {"certificates": certs, "total": len(certs), "page": page, "page_size": page_size}
+    return {
+        "certificates": certs,
+        "total": len(certs),
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 def _report_cert_usage_sync(org_id: str, stripe_sub_id: str | None) -> None:
@@ -62,13 +74,18 @@ def _report_cert_usage_sync(org_id: str, stripe_sub_id: str | None) -> None:
         return
     import stripe as stripe_lib
     from services.billing_service import PRICE_CERT_OVERAGE
+
     if PRICE_CERT_OVERAGE == "price_cert_overage_placeholder":
         return
     stripe_lib.api_key = settings.stripe_secret_key
     try:
         sub = stripe_lib.Subscription.retrieve(stripe_sub_id, expand=["items"])
         metered_item = next(
-            (item for item in sub["items"]["data"] if item["price"]["id"] == PRICE_CERT_OVERAGE),
+            (
+                item
+                for item in sub["items"]["data"]
+                if item["price"]["id"] == PRICE_CERT_OVERAGE
+            ),
             None,
         )
         if metered_item:
@@ -97,20 +114,27 @@ def generate_and_store_certificate_sync(
             select(Shipment).where(Shipment.id == uuid.UUID(shipment_id))
         ).scalar_one()
         det = session.execute(
-            select(OriginDetermination).where(OriginDetermination.id == uuid.UUID(determination_id))
+            select(OriginDetermination).where(
+                OriginDetermination.id == uuid.UUID(determination_id)
+            )
         ).scalar_one_or_none()
         org = session.execute(
             select(Organization).where(Organization.id == uuid.UUID(org_id))
         ).scalar_one()
-        product = session.execute(
-            select(Product).where(Product.id == ship.product_id)
-        ).scalar_one_or_none() if ship.product_id else None
+        product = (
+            session.execute(
+                select(Product).where(Product.id == ship.product_id)
+            ).scalar_one_or_none()
+            if ship.product_id
+            else None
+        )
 
         # Build CertificateData
         cert_data = _build_cert_data(ship, det, org, product, cert_type)
 
         # Generate PDF (with digital signature)
         from generator import generate_certificate
+
         pdf_bytes = generate_certificate(cert_data, sign=True)
 
         # Store to S3 (or local fallback)
@@ -139,7 +163,10 @@ def generate_and_store_certificate_sync(
 
         # Report to Stripe metered billing (sync, non-blocking)
         try:
-            _report_cert_usage_sync(org_id=org_id, stripe_sub_id=getattr(org, "stripe_subscription_id", None))
+            _report_cert_usage_sync(
+                org_id=org_id,
+                stripe_sub_id=getattr(org, "stripe_subscription_id", None),
+            )
         except Exception:
             pass
 
@@ -147,17 +174,20 @@ def generate_and_store_certificate_sync(
         try:
             import asyncio
             from services.webhook_delivery_service import fire_event_sync
-            asyncio.run(fire_event_sync(
-                org_id=uuid.UUID(org_id),
-                event_type="certificate.issued",
-                payload={
-                    "certificate_id": str(cert.id),
-                    "cert_type": cert_type,
-                    "cert_number": cert_number,
-                    "shipment_id": shipment_id,
-                    "pdf_url": pdf_url,
-                },
-            ))
+
+            asyncio.run(
+                fire_event_sync(
+                    org_id=uuid.UUID(org_id),
+                    event_type="certificate.issued",
+                    payload={
+                        "certificate_id": str(cert.id),
+                        "cert_type": cert_type,
+                        "cert_number": cert_number,
+                        "shipment_id": shipment_id,
+                        "pdf_url": pdf_url,
+                    },
+                )
+            )
         except Exception:
             pass
 
@@ -169,7 +199,9 @@ def _build_cert_data(ship, det, org, product, cert_type: str):
     import random
     import string
 
-    cert_number = "UP-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    cert_number = "UP-" + "".join(
+        random.choices(string.ascii_uppercase + string.digits, k=8)
+    )
     origin_criterion = _infer_origin_criterion(det)
 
     exporter = ExporterInfo(
@@ -184,16 +216,18 @@ def _build_cert_data(ship, det, org, product, cert_type: str):
     )
     goods = []
     if product:
-        goods.append(GoodLine(
-            line_no=1,
-            description=product.name or product.description or "Goods",
-            hs_code=product.hs_code or "0000.00",
-            origin_country=ship.origin_country or "CA",
-            quantity=1,
-            unit="shipment",
-            unit_value_usd=float(ship.shipment_value_usd or 0),
-            total_value_usd=float(ship.shipment_value_usd or 0),
-        ))
+        goods.append(
+            GoodLine(
+                line_no=1,
+                description=product.name or product.description or "Goods",
+                hs_code=product.hs_code or "0000.00",
+                origin_country=ship.origin_country or "CA",
+                quantity=1,
+                unit="shipment",
+                unit_value_usd=float(ship.shipment_value_usd or 0),
+                total_value_usd=float(ship.shipment_value_usd or 0),
+            )
+        )
 
     return CertificateData(
         cert_type=cert_type,

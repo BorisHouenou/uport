@@ -1,4 +1,5 @@
 """Email delivery service — AWS SES with dev fallback to structlog."""
+
 import structlog
 from core.config import get_settings
 
@@ -12,12 +13,15 @@ def send_email(*, to: str, subject: str, body_html: str, body_text: str) -> bool
     """
     settings = get_settings()
 
-    if settings.environment != "production" or not getattr(settings, "ses_from_email", None):
+    if settings.environment != "production" or not getattr(
+        settings, "ses_from_email", None
+    ):
         logger.info("email_dev_fallback", to=to, subject=subject)
         return True
 
     try:
         import boto3
+
         client = boto3.client("ses", region_name=settings.aws_region)
         client.send_email(
             Source=settings.ses_from_email,
@@ -38,6 +42,7 @@ def send_email(*, to: str, subject: str, body_html: str, body_text: str) -> bool
 
 # ─── Templates ────────────────────────────────────────────────────────────────
 
+
 def supplier_expiry_reminder_html(
     supplier_name: str,
     product_id: str,
@@ -46,7 +51,11 @@ def supplier_expiry_reminder_html(
     dashboard_url: str,
 ) -> tuple[str, str]:
     """Return (html, plain_text) for a supplier declaration expiry reminder."""
-    urgency = "URGENT: " if days_remaining <= 1 else ("Action needed: " if days_remaining <= 7 else "")
+    urgency = (
+        "URGENT: "
+        if days_remaining <= 1
+        else ("Action needed: " if days_remaining <= 7 else "")
+    )
     subject = f"{urgency}Supplier declaration expires in {days_remaining} day{'s' if days_remaining != 1 else ''}"
 
     html = f"""
@@ -58,7 +67,7 @@ def supplier_expiry_reminder_html(
         <p>Hello,</p>
         <p>The supplier declaration from <strong>{supplier_name}</strong> for product
         <code>{product_id}</code> is expiring on <strong>{valid_until}</strong>
-        ({days_remaining} day{'s' if days_remaining != 1 else ''} remaining).</p>
+        ({days_remaining} day{"s" if days_remaining != 1 else ""} remaining).</p>
         <p>An expired declaration may invalidate your preferential tariff claims under CUSMA, CETA, and CPTPP.</p>
         <p style="margin:24px 0;">
           <a href="{dashboard_url}" style="background:#0062c9;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">

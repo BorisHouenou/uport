@@ -1,4 +1,5 @@
 """Clerk authentication middleware and dependency injection."""
+
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, Security, status

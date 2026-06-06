@@ -1,4 +1,5 @@
 """RAG compliance assistant chat endpoint."""
+
 import json
 
 from fastapi import APIRouter, Depends, Request
@@ -82,4 +83,5 @@ async def get_chat_history(
 ):
     """Retrieve recent chat history for the current user."""
     from services.rag_service import get_chat_history
+
     return await get_chat_history(db, current_user["user_id"], limit)
