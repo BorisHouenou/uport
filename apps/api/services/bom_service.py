@@ -31,12 +31,34 @@ async def get_bom_items(
     items = items_result.scalars().all()
     total_cost = sum(float(i.unit_cost) * float(i.quantity) for i in items)
 
-    non_orig = sum(float(i.unit_cost) * float(i.quantity) for i in items if i.is_originating is False)
+    # Non-originating = items whose origin_country is unknown (XX) or not the product's origin
+    non_orig = sum(
+        float(i.unit_cost) * float(i.quantity)
+        for i in items
+        if i.origin_country in ("XX", None) or (product.origin_country and i.origin_country != product.origin_country)
+    )
     foreign_pct = round((non_orig / total_cost * 100) if total_cost > 0 else 0, 2)
 
     return {
         "product_id": product_id,
-        "items": items,
+        "items": [
+            {
+                "id": i.id,
+                "product_id": i.product_id,
+                "description": i.description,
+                "quantity": float(i.quantity),
+                "unit_cost": float(i.unit_cost),
+                "currency": i.currency,
+                "origin_country": i.origin_country,
+                "hs_code": i.hs_code,
+                "hs_confidence": float(i.hs_confidence) if i.hs_confidence is not None else None,
+                "classified_by": i.classified_by,
+                "total_cost": round(float(i.unit_cost) * float(i.quantity), 4),
+                "created_at": i.created_at,
+                "updated_at": i.updated_at,
+            }
+            for i in items
+        ],
         "total_items": len(items),
         "total_cost_usd": round(total_cost, 2),
         "foreign_content_pct": foreign_pct,
