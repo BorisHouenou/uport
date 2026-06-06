@@ -273,7 +273,7 @@ def _build_pdf(
 # ── Routes — fixed routes MUST come before parameterized routes ────────────────
 
 
-@router.get("/", response_model=CertificateListResponse)
+@router.get("", response_model=CertificateListResponse)
 async def list_certificates(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),

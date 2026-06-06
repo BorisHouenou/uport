@@ -14,14 +14,19 @@ settings = get_settings()
 # asyncpg doesn't reliably pick up ssl/sslmode from the URL when used
 # through SQLAlchemy; connect_args is the guaranteed path.
 _db_url = settings.database_url
-for _param in ("?ssl=require", "&ssl=require", "?sslmode=require", "&sslmode=require"):
+_needs_ssl = "ssl=require" in _db_url or "sslmode=require" in _db_url
+for _param in ("?ssl=require", "&ssl=require", "?ssl=disable", "&ssl=disable",
+               "?sslmode=require", "&sslmode=require"):
     _db_url = _db_url.replace(_param, "")
 
-# Railway PostgreSQL requires SSL. Use CERT_NONE since Railway uses
-# a self-signed cert on the internal network.
-_ssl_ctx = ssl.create_default_context()
-_ssl_ctx.check_hostname = False
-_ssl_ctx.verify_mode = ssl.CERT_NONE
+if _needs_ssl:
+    # Railway PostgreSQL requires SSL. Use CERT_NONE since Railway uses
+    # a self-signed cert on the internal network.
+    _ssl_ctx: ssl.SSLContext | bool = ssl.create_default_context()
+    _ssl_ctx.check_hostname = False  # type: ignore[union-attr]
+    _ssl_ctx.verify_mode = ssl.CERT_NONE  # type: ignore[union-attr]
+else:
+    _ssl_ctx = False  # local development — no SSL
 
 engine = create_async_engine(
     _db_url,
