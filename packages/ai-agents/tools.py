@@ -30,13 +30,14 @@ from typing import Any
 _ROO_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "roo-engine"))
 _ROO_LOCK = threading.Lock()
 _ROO_CLASSES: dict | None = None
-_ROO_CONFLICT_NAMES = ["models", "engine", "rvc", "tariff_shift", "wholly_obtained", "confidence"]
 
 
 def _get_roo_classes() -> dict:
     """
-    Return a dict of roo-engine classes, loading them exactly once.
-    Safe to call from multiple threads; uses double-checked locking.
+    Load roo-engine classes exactly once, using importlib to give each module a
+    private sys.modules name (_roo_models, _roo_engine, …).  This avoids all
+    collisions with the API's own 'models' package regardless of sys.path order
+    or concurrent thread activity.
     """
     global _ROO_CLASSES
     if _ROO_CLASSES is not None:
@@ -46,35 +47,52 @@ def _get_roo_classes() -> dict:
         if _ROO_CLASSES is not None:
             return _ROO_CLASSES
 
-        if _ROO_DIR not in sys.path:
-            sys.path.insert(0, _ROO_DIR)
+        import importlib.util as _ilu
+        from types import ModuleType
 
-        # Snapshot sys.modules so we can clean up everything roo-engine loads.
-        pre_keys = set(sys.modules.keys())
+        def _load(mod_name: str, inject: dict[str, ModuleType]) -> ModuleType:
+            """Load one roo-engine .py file under the private name _roo_<mod_name>."""
+            path = os.path.join(_ROO_DIR, f"{mod_name}.py")
+            spec = _ilu.spec_from_file_location(f"_roo_{mod_name}", path)
+            module = _ilu.module_from_spec(spec)
+            # Temporarily inject dependencies so `from X import Y` inside the
+            # module resolves to our already-loaded roo modules, not any
+            # identically-named package elsewhere in sys.modules.
+            prev: dict[str, Any] = {}
+            for k, v in inject.items():
+                prev[k] = sys.modules.get(k)
+                sys.modules[k] = v
+            try:
+                spec.loader.exec_module(module)  # type: ignore[union-attr]
+            finally:
+                for k in inject:
+                    old = prev[k]
+                    if old is None:
+                        sys.modules.pop(k, None)
+                    else:
+                        sys.modules[k] = old
+            return module
 
-        # Save and remove the names roo-engine uses internally (avoids API-models clash).
-        saved = {n: sys.modules.pop(n, None) for n in _ROO_CONFLICT_NAMES}
+        _m  = _load("models",          {})
+        _c  = _load("confidence",      {})
+        _r  = _load("rvc",             {"models": _m})
+        _ts = _load("tariff_shift",    {"models": _m})
+        _wo = _load("wholly_obtained", {"models": _m})
+        _e  = _load("engine", {
+            "models":          _m,
+            "confidence":      _c,
+            "rvc":             _r,
+            "tariff_shift":    _ts,
+            "wholly_obtained": _wo,
+        })
 
-        try:
-            import models as _roo_models   # noqa: PLC0415
-            import engine as _roo_engine   # noqa: PLC0415
-
-            _ROO_CLASSES = {
-                "RooEngine":   _roo_engine.RooEngine,
-                "BOMLine":     _roo_models.BOMLine,
-                "ProductInfo": _roo_models.ProductInfo,
-                "RooRule":     _roo_models.RooRule,
-                "RuleType":    _roo_models.RuleType,
-            }
-        finally:
-            # Remove any new entries roo-engine added under plain names.
-            for key in set(sys.modules.keys()) - pre_keys:
-                sys.modules.pop(key, None)
-            # Restore the API's original modules.
-            for name, mod in saved.items():
-                if mod is not None:
-                    sys.modules[name] = mod
-
+        _ROO_CLASSES = {
+            "RooEngine":   _e.RooEngine,
+            "BOMLine":     _m.BOMLine,
+            "ProductInfo": _m.ProductInfo,
+            "RooRule":     _m.RooRule,
+            "RuleType":    _m.RuleType,
+        }
         return _ROO_CLASSES
 
 
