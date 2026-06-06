@@ -1,17 +1,18 @@
 """Origin determination endpoints."""
 
+import asyncio
 import logging
+import os
+import sys
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import get_db
+from core.database import AsyncSessionLocal, get_db
 from middleware.auth import CurrentUser
 from models import OriginDetermination, Shipment, HumanCorrection
 from schemas.origin import (
@@ -20,15 +21,36 @@ from schemas.origin import (
     OriginQueryResponse,
 )
 
+logger = logging.getLogger(__name__)
+
+_AI_AGENTS = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "ai-agents")
+)
+if _AI_AGENTS not in sys.path:
+    sys.path.insert(0, _AI_AGENTS)
+
 router = APIRouter(prefix="/origin", tags=["origin"])
 
 CONFIDENCE_REVIEW_THRESHOLD = 0.75
+
+_AGREEMENT_NAMES = {
+    "cusma": "Canada-United States-Mexico Agreement",
+    "ceta": "Canada-European Union Comprehensive Economic and Trade Agreement",
+    "cptpp": "Comprehensive and Progressive Agreement for Trans-Pacific Partnership",
+    "afcfta": "African Continental Free Trade Area",
+    "ckfta": "Canada-Korea Free Trade Agreement",
+    "ccofta": "Canada-Colombia Free Trade Agreement",
+    "cpafta": "Canada-Panama Free Trade Agreement",
+    "cifta": "Canada-Israel Free Trade Agreement",
+    "cufta": "Canada-Ukraine Free Trade Agreement",
+    "cjfta": "Canada-Jordan Free Trade Agreement",
+}
 
 
 class ReviewDecision(BaseModel):
     decision: str  # "approved" | "rejected"
     reviewer_notes: str | None = None
-    corrected_result: str | None = None  # override result if rejected
+    corrected_result: str | None = None
 
 
 class CorrectionCreate(BaseModel):
@@ -38,25 +60,95 @@ class CorrectionCreate(BaseModel):
     reviewer_notes: str | None = None
 
 
+async def _run_determination_bg(
+    stub_id: uuid.UUID,
+    shipment_id: uuid.UUID,
+    ship_input_dict: dict,
+    shipment_value_usd: float,
+) -> None:
+    """Background task: run origin agent, replace stub with real results."""
+    from origin_agent import ShipmentInput, run_origin_determination
+
+    try:
+        ship_input = ShipmentInput(**ship_input_dict)
+        engine_result = await asyncio.to_thread(run_origin_determination, ship_input)
+    except Exception as exc:
+        logger.exception("Origin determination engine failed for shipment %s", shipment_id)
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                OriginDetermination.__table__.update()
+                .where(OriginDetermination.id == stub_id)
+                .values(status="failed", reasoning=f"{type(exc).__name__}: {exc}", result="fail")
+            )
+            await db.commit()
+        return
+
+    async with AsyncSessionLocal() as db:
+        # Delete the stub
+        await db.execute(
+            delete(OriginDetermination).where(OriginDetermination.id == stub_id)
+        )
+
+        determinations = []
+        for det_dict in engine_result.determinations:
+            code = det_dict.get("agreement_code", "")
+            passing = det_dict.get("result") == "pass"
+            saving = det_dict.get("savings_per_unit") or (
+                shipment_value_usd * 0.065 if passing else 0
+            )
+            det = OriginDetermination(
+                id=uuid.uuid4(),
+                shipment_id=shipment_id,
+                agreement_code=code,
+                agreement_name=_AGREEMENT_NAMES.get(code, code.upper()),
+                rule_applied=det_dict.get("rule_applied") or "tariff_shift",
+                rule_text=det_dict.get("rule_text", ""),
+                result=det_dict.get("result") or "fail",
+                confidence=float(det_dict.get("confidence") or 0.0),
+                reasoning=det_dict.get("reasoning", ""),
+                preferential_rate="0%" if passing else None,
+                savings_per_unit=saving,
+                status="completed" if not engine_result.needs_human_review else "needs_review",
+            )
+            db.add(det)
+            determinations.append(det)
+
+        if not determinations:
+            db.add(OriginDetermination(
+                id=uuid.uuid4(),
+                shipment_id=shipment_id,
+                agreement_code="none",
+                agreement_name="No applicable agreement",
+                rule_applied="tariff_shift",
+                rule_text="; ".join(engine_result.review_reasons),
+                result="fail",
+                confidence=0.0,
+                reasoning=engine_result.llm_summary or "No applicable FTA found.",
+                status="needs_review",
+            ))
+
+        await db.commit()
+    logger.info("Origin determination complete for shipment %s", shipment_id)
+
+
 @router.post("/determine", response_model=OriginDeterminationResponse, status_code=201)
 async def determine_origin(
     payload: OriginDeterminationCreate,
     current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Run the RoO determination engine for a shipment.
-    Evaluates all applicable trade agreements and returns pass/fail
-    per agreement with full reasoning chain.
+    Kick off RoO determination for a shipment.
+    Saves a 'queued' stub immediately and returns; agent runs in background.
+    Frontend polls GET /origin/{id} until status != 'queued'/'processing'.
     """
     org_id = current_user["org_id"]
     shipment_id = payload.shipment_id
 
-    # Verify the shipment exists and belongs to this org
     if not org_id:
-        raise HTTPException(
-            status_code=403, detail="No organization associated with this account"
-        )
+        raise HTTPException(status_code=403, detail="No organization associated with this account")
+
     ship_result = await db.execute(
         select(Shipment).where(
             Shipment.id == shipment_id,
@@ -67,7 +159,6 @@ async def determine_origin(
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
 
-    # ── Inline determination (no Celery worker required) ──────────────────────
     from models import Product, BOMItem
 
     product = None
@@ -79,19 +170,6 @@ async def determine_origin(
     if product:
         b = await db.execute(select(BOMItem).where(BOMItem.product_id == product.id))
         bom_rows = b.scalars().all()
-
-    # ── Run the real origin determination engine ──────────────────────────────
-    import sys as _sys
-    import os as _os
-
-    _sys.path.insert(
-        0,
-        _os.path.join(
-            _os.path.dirname(__file__), "..", "..", "..", "packages", "ai-agents"
-        ),
-    )
-
-    from origin_agent import ShipmentInput, run_origin_determination
 
     bom_dicts = [
         {
@@ -105,110 +183,47 @@ async def determine_origin(
         for b in bom_rows
     ]
 
-    try:
-        import asyncio
-        ship_input = ShipmentInput(
-            hs_code=(product.hs_code or "0000") if product else "0000",
-            product_description=(product.name or "Unknown product") if product else "Unknown product",
-            production_country=shipment.origin_country or "XX",
-            destination_country=shipment.destination_country or "XX",
-            transaction_value_usd=float(shipment.shipment_value_usd or 0),
-            bom=bom_dicts,
-            agreement_codes=payload.agreement_codes or [],
-        )
-        engine_result = await asyncio.to_thread(run_origin_determination, ship_input)
-    except Exception as exc:
-        logger.exception("Origin determination engine failed for shipment %s", shipment_id)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Origin engine error: {type(exc).__name__}: {exc}",
-        ) from exc
-
-    _AGREEMENT_NAMES = {
-        "cusma": "Canada-United States-Mexico Agreement",
-        "ceta": "Canada-European Union Comprehensive Economic and Trade Agreement",
-        "cptpp": "Comprehensive and Progressive Agreement for Trans-Pacific Partnership",
-        "afcfta": "African Continental Free Trade Area",
-        "ckfta": "Canada-Korea Free Trade Agreement",
-        "ccofta": "Canada-Colombia Free Trade Agreement",
-        "cpafta": "Canada-Panama Free Trade Agreement",
-        "cifta": "Canada-Israel Free Trade Agreement",
-        "cufta": "Canada-Ukraine Free Trade Agreement",
-        "cjfta": "Canada-Jordan Free Trade Agreement",
+    ship_input_dict = {
+        "hs_code": (product.hs_code or "0000") if product else "0000",
+        "product_description": (product.name or "Unknown product") if product else "Unknown product",
+        "production_country": shipment.origin_country or "XX",
+        "destination_country": shipment.destination_country or "XX",
+        "transaction_value_usd": float(shipment.shipment_value_usd or 0),
+        "bom": bom_dicts,
+        "agreement_codes": payload.agreement_codes or [],
     }
 
-    determinations = []
-    for det_dict in engine_result.determinations:
-        code = det_dict.get("agreement_code", "")
-        passing = det_dict.get("result") == "pass"
-        saving = det_dict.get("savings_per_unit") or (
-            float(shipment.shipment_value_usd or 0) * 0.065 if passing else 0
-        )
-        det = OriginDetermination(
-            id=uuid.uuid4(),
-            shipment_id=shipment_id,
-            agreement_code=code,
-            agreement_name=_AGREEMENT_NAMES.get(code, code.upper()),
-            rule_applied=det_dict.get("rule_applied", "unknown"),
-            rule_text=det_dict.get("rule_text", ""),
-            result=det_dict.get("result", "fail"),
-            confidence=float(det_dict.get("confidence", 0.0)),
-            reasoning=det_dict.get("reasoning", ""),
-            preferential_rate="0%" if passing else None,
-            mfn_rate=None,
-            savings_per_unit=saving,
-            status="completed"
-            if not engine_result.needs_human_review
-            else "needs_review",
-        )
-        db.add(det)
-        determinations.append(det)
-
-    # If engine returned no determinations (no FTA / no rules), persist a stub
-    if not determinations:
-        stub = OriginDetermination(
-            id=uuid.uuid4(),
-            shipment_id=shipment_id,
-            agreement_code="none",
-            agreement_name="No applicable agreement",
-            rule_applied="none",
-            rule_text="; ".join(engine_result.review_reasons),
-            result="fail",
-            confidence=0.0,
-            reasoning=engine_result.llm_summary or "No applicable FTA found.",
-            status="needs_review",
-        )
-        db.add(stub)
-        determinations.append(stub)
-
+    # ── Persist a stub, return immediately, run agent in background ───────────
+    stub_id = uuid.uuid4()
+    stub = OriginDetermination(
+        id=stub_id,
+        shipment_id=shipment_id,
+        agreement_code="pending",
+        agreement_name="Processing…",
+        rule_applied="tariff_shift",
+        result="fail",
+        confidence=0.0,
+        reasoning="Determination in progress",
+        status="queued",
+    )
+    db.add(stub)
     await db.commit()
 
-    best = next((d for d in determinations if d.result == "pass"), None)
-    total_savings = sum(
-        float(d.savings_per_unit or 0) for d in determinations if d.result == "pass"
+    background_tasks.add_task(
+        _run_determination_bg,
+        stub_id,
+        shipment_id,
+        ship_input_dict,
+        float(shipment.shipment_value_usd or 0),
     )
 
     return OriginDeterminationResponse(
-        task_id=str(determinations[0].id),
-        status="completed",
+        task_id=str(stub_id),
+        status="queued",
         shipment_id=shipment_id,
-        results=[
-            {
-                "agreement_code": d.agreement_code,
-                "agreement_name": d.agreement_name,
-                "rule_applied": d.rule_applied,
-                "rule_text": d.rule_text,
-                "result": d.result,
-                "confidence": float(d.confidence),
-                "reasoning": d.reasoning,
-                "preferential_rate": d.preferential_rate,
-                "mfn_rate": d.mfn_rate,
-                "savings_per_unit": float(d.savings_per_unit or 0),
-            }
-            for d in determinations
-        ],
-        best_agreement=best.agreement_code if best else None,
-        total_savings_usd=total_savings,
+        results=None,
+        best_agreement=None,
+        total_savings_usd=None,
     )
 
 
@@ -315,22 +330,42 @@ async def get_determination(
             status_code=status.HTTP_404_NOT_FOUND, detail="Determination not found"
         )
 
+    # While queued/processing, return early so the frontend spinner keeps running
+    if det.status in ("queued", "processing"):
+        return {
+            "id": str(det.id),
+            "shipment_id": str(det.shipment_id),
+            "status": det.status,
+            "results": [],
+            "best_agreement": None,
+            "total_savings_usd": None,
+            "reviewed_by": None,
+        }
+
     # Fetch ALL determinations for this shipment, deduplicated to latest per agreement
+    # Skip the "pending" stub code (shouldn't exist at this point, but guard anyway)
     all_dets_result = await db.execute(
         select(OriginDetermination)
         .where(OriginDetermination.shipment_id == det.shipment_id)
+        .where(OriginDetermination.agreement_code != "pending")
         .order_by(
             OriginDetermination.agreement_code, OriginDetermination.created_at.desc()
         )
     )
     all_rows = all_dets_result.scalars().all()
-    # Keep only the most recent determination per agreement code
     seen: set[str] = set()
     all_dets = []
     for d in all_rows:
         if d.agreement_code not in seen:
             seen.add(d.agreement_code)
             all_dets.append(d)
+
+    # Derive overall status from individual rows
+    overall_status = "completed"
+    if any(d.status == "needs_review" for d in all_dets):
+        overall_status = "needs_review"
+    if any(d.status == "failed" for d in all_dets):
+        overall_status = "failed"
 
     best = next((d for d in all_dets if d.result == "pass"), None)
     total_savings = sum(
@@ -340,12 +375,12 @@ async def get_determination(
     return {
         "id": str(det.id),
         "shipment_id": str(det.shipment_id),
-        "status": "completed",
+        "status": overall_status,
         "results": [
             {
                 "agreement_code": d.agreement_code,
                 "agreement_name": d.agreement_name,
-                "rule_applied": d.rule_applied,
+                "rule_applied": d.rule_applied or "tariff_shift",
                 "rule_text": d.rule_text or "",
                 "result": d.result,
                 "confidence": float(d.confidence),

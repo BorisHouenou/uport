@@ -32,7 +32,7 @@ export function DeterminationResults({ determinationId }: DeterminationResultsPr
   const generateCert = useGenerateCertificate();
   const { getToken } = useAuth();
 
-  if (isLoading || !data) return <PageSpinner />;
+  if (isLoading || !data || data.status === "queued" || data.status === "processing") return <PageSpinner />;
 
   const determinations = data.results ?? [];
   const bestAgreement  = data.best_agreement;

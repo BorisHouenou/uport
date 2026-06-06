@@ -88,7 +88,10 @@ export function useDetermination(determinationId: string | null) {
     queryKey: ["determination", determinationId],
     queryFn: () => apiClient.get(`/origin/${determinationId}`).then(r => r.data),
     enabled: !!determinationId,
-    refetchInterval: (data: any) => data?.status === "queued" || data?.status === "processing" ? 2000 : false,
+    refetchInterval: (query) => {
+      const apiStatus = (query.state.data as any)?.status;
+      return apiStatus === "queued" || apiStatus === "processing" ? 2000 : false;
+    },
   });
 }
 
