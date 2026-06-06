@@ -117,7 +117,7 @@ async def upload_bom(
     saved_items: list[tuple[uuid.UUID, str]] = []  # (id, description) for items needing HS
     for row in rows:
         item_id = uuid.uuid4()
-        classified_by = "imported" if row.hs_code else "pending"
+        classified_by = "imported" if row.hs_code else "ai"
         db.add(BOMItem(
             id=item_id,
             product_id=product_id,
